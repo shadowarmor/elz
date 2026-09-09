@@ -1,0 +1,324 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.47.16.16243",
+      "templateHash": "5564836185115657250"
+    }
+  },
+  "parameters": {
+    "prefix": {
+      "type": "string",
+      "defaultValue": "elz",
+      "minLength": 2,
+      "maxLength": 12,
+      "metadata": {
+        "description": "Organization/workload prefix. Use a unique value to vend additional landing zones within a subscription."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "southafricanorth",
+      "metadata": {
+        "description": "Resource region."
+      }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "prod",
+      "allowedValues": [
+        "prod",
+        "nonprod"
+      ],
+      "metadata": {
+        "description": "Application environment."
+      }
+    },
+    "addressPrefix": {
+      "type": "string",
+      "defaultValue": "10.10.0.0/16",
+      "metadata": {
+        "description": "Non-overlapping private IPv4 CIDR, /16 to /24."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "Owner": "application-team",
+        "CostCenter": "applications",
+        "ManagedBy": "Bicep",
+        "Project": "elz"
+      },
+      "metadata": {
+        "description": "Common tags. Include Owner and CostCenter when deploying standalone."
+      }
+    },
+    "applicationTeamGroupObjectId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional Entra group object ID granted Contributor only on the workload resource group."
+      }
+    }
+  },
+  "variables": {
+    "resourceTags": "[union(parameters('tags'), createObject('Environment', parameters('environment'), 'LandingZone', 'application'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2025-04-01",
+      "name": "[format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('resourceTags')]"
+    },
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2025-04-01",
+      "name": "[format('rg-{0}-{1}-workload', parameters('prefix'), parameters('environment'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('resourceTags')]"
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-{1}-network', parameters('prefix'), parameters('environment'))]",
+      "resourceGroup": "[format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('vnet-{0}-{1}', parameters('prefix'), parameters('environment'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "addressPrefix": {
+            "value": "[parameters('addressPrefix')]"
+          },
+          "tags": {
+            "value": "[variables('resourceTags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "14080522818390229323"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string",
+              "metadata": {
+                "description": "Virtual network name."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource region."
+              }
+            },
+            "addressPrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Network address prefix. Must be /16 to /24; reserves two /26 subnets."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Resource tags."
+              }
+            }
+          },
+          "variables": {
+            "subnetDefinitions": [
+              {
+                "name": "snet-workload",
+                "cidr": "[cidrSubnet(parameters('addressPrefix'), 26, 0)]"
+              },
+              {
+                "name": "snet-private-endpoints",
+                "cidr": "[cidrSubnet(parameters('addressPrefix'), 26, 1)]"
+              }
+            ]
+          },
+          "resources": [
+            {
+              "copy": {
+                "name": "nsg",
+                "count": "[length(variables('subnetDefinitions'))]"
+              },
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2024-10-01",
+              "name": "[format('nsg-{0}-{1}', parameters('name'), variables('subnetDefinitions')[copyIndex()].name)]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "Deny-All-Inbound",
+                    "properties": {
+                      "priority": 4096,
+                      "direction": "Inbound",
+                      "access": "Deny",
+                      "protocol": "*",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "*",
+                      "sourceAddressPrefix": "*",
+                      "destinationAddressPrefix": "*"
+                    }
+                  },
+                  {
+                    "name": "Deny-All-Outbound",
+                    "properties": {
+                      "priority": 4096,
+                      "direction": "Outbound",
+                      "access": "Deny",
+                      "protocol": "*",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "*",
+                      "sourceAddressPrefix": "*",
+                      "destinationAddressPrefix": "*"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2024-10-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "copy": [
+                  {
+                    "name": "subnets",
+                    "count": "[length(variables('subnetDefinitions'))]",
+                    "input": {
+                      "name": "[variables('subnetDefinitions')[copyIndex('subnets')].name]",
+                      "properties": {
+                        "addressPrefix": "[variables('subnetDefinitions')[copyIndex('subnets')].cidr]",
+                        "defaultOutboundAccess": false,
+                        "privateEndpointNetworkPolicies": "Enabled",
+                        "networkSecurityGroup": {
+                          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-{0}-{1}', parameters('name'), variables('subnetDefinitions')[copyIndex('subnets')].name))]"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "[parameters('addressPrefix')]"
+                  ]
+                }
+              },
+              "dependsOn": [
+                "nsg"
+              ]
+            }
+          ],
+          "outputs": {
+            "virtualNetworkId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('name'))]"
+            },
+            "workloadSubnetId": {
+              "type": "string",
+              "value": "[format('{0}/subnets/snet-workload', resourceId('Microsoft.Network/virtualNetworks', parameters('name')))]"
+            },
+            "privateEndpointSubnetId": {
+              "type": "string",
+              "value": "[format('{0}/subnets/snet-private-endpoints', resourceId('Microsoft.Network/virtualNetworks', parameters('name')))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment')))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('applicationTeamGroupObjectId')))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-{1}-team', parameters('prefix'), parameters('environment'))]",
+      "resourceGroup": "[format('rg-{0}-{1}-workload', parameters('prefix'), parameters('environment'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "principalId": {
+            "value": "[parameters('applicationTeamGroupObjectId')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "13520752404634784364"
+            }
+          },
+          "parameters": {
+            "principalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Existing application team Entra group object ID."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceGroup().id, parameters('principalId'), 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "Group",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}-workload', parameters('prefix'), parameters('environment')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "virtualNetworkId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.virtualNetworkId.value]"
+    },
+    "workloadResourceGroupId": {
+      "type": "string",
+      "value": "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}-workload', parameters('prefix'), parameters('environment')))]"
+    },
+    "workloadSubnetId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.workloadSubnetId.value]"
+    },
+    "privateEndpointSubnetId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.privateEndpointSubnetId.value]"
+    }
+  }
+}

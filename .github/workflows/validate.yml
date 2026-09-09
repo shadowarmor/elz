@@ -1,0 +1,21 @@
+name: Validate landing zone
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned Bicep compiler
+        run: az bicep install --version v0.47.16
+      - name: Compile, check committed portal templates, and test
+        shell: pwsh
+        run: ./scripts/build.ps1 -Check

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "organizationPrefix": { "value": "elz" },
+    "organizationName": { "value": "Enterprise Landing Zone" },
+    "location": { "value": "southafricanorth" },
+    "platformSubscriptionId": { "value": "REPLACE-WITH-CONNECTIVITY-SUBSCRIPTION-ID" },
+    "managementSubscriptionId": { "value": "REPLACE-WITH-MANAGEMENT-SUBSCRIPTION-ID" },
+    "identitySubscriptionId": { "value": "REPLACE-WITH-IDENTITY-SUBSCRIPTION-ID" },
+    "securitySubscriptionId": { "value": "REPLACE-WITH-SECURITY-SUBSCRIPTION-ID" },
+    "applicationSubscriptionId": { "value": "REPLACE-WITH-PRODUCTION-SUBSCRIPTION-ID" },
+    "nonproductionSubscriptionId": { "value": "REPLACE-WITH-NONPRODUCTION-SUBSCRIPTION-ID" },
+    "applicationArchetype": { "value": "corp" },
+    "allowedLocations": { "value": ["southafricanorth", "southafricawest"] },
+    "owner": { "value": "platform-team" },
+    "costCenter": { "value": "shared-services" }
+  }
+}
