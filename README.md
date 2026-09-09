@@ -2,7 +2,7 @@
 
 Deploy a tenant-wide Azure foundation from Bicep: management groups, platform and application landing zones, subscription placement, policy, and optional group-based RBAC. Designed for a **greenfield Entra tenant in Azure public cloud**, with **no standing-charge services deployed by default**.
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2Fshadowarmor%2Felz%40d3ea03a5d460c01ecba6a4796660c34d9372ca03%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2Fshadowarmor%2Felz%40721ae7559e1db301e528b71601ae3d5e9b111782%2Fazuredeploy.json)
 [![Validate landing zone](https://github.com/shadowarmor/elz/actions/workflows/validate.yml/badge.svg)](https://github.com/shadowarmor/elz/actions/workflows/validate.yml)
 
 **Before clicking:** [complete the one-time tenant bootstrap](docs/bootstrap.md). You need **two existing empty Azure subscriptions** in that tenant and permission to deploy at tenant scope `/`. Entra Global Administrator alone is insufficient. The template cannot create an Entra tenant, grant its own starting permissions, or obtain a billing agreement. Azure subscription creation depends on your billing offer and is outside this portable scaffold.
@@ -16,7 +16,7 @@ Deploy a tenant-wide Azure foundation from Bicep: management groups, platform an
 5. Keep the default nonoverlapping network ranges or provide private IPv4 networks of `/16` through `/24`. If setting Allowed Locations, include the resource Location. Enter optional Entra **group object IDs** for delegated access.
 6. Select **Review + create**, inspect validation, then **Create**. After completion, use deployment outputs and the [verification guide](docs/operations.md) to check hierarchy, policies, networks, and access.
 
-One deployment orchestrates the platform and application scaffolds. All modules are embedded in the committed ARM JSON; Azure does not need Bicep, a private registry, GitHub credentials, or deployment scripts. The buttons download the public template through jsDelivr, pinned to verified template commit `d3ea03a5d460c01ecba6a4796660c34d9372ca03`. This avoids the GitHub raw-content endpoint that returned HTTP 503 during portal downloads. [Updating the pinned templates](docs/operations.md#updating-and-redeploying).
+One deployment orchestrates the platform and application scaffolds. All modules are embedded in the committed ARM JSON; Azure does not need Bicep, a private registry, GitHub credentials, or deployment scripts. The buttons download the public template through jsDelivr, pinned to verified template commit `721ae7559e1db301e528b71601ae3d5e9b111782`. This avoids the GitHub raw-content endpoint that returned HTTP 503 during portal downloads. [Updating the pinned templates](docs/operations.md#updating-and-redeploying).
 
 ## What gets created
 
@@ -85,7 +85,7 @@ python scripts/preflight.py --parameters examples/deployment.local.json --online
 
 `infra/main.bicep` is the tenant entry point; `infra/platform.bicep` and `infra/application.bicep` are reusable building blocks. The [separated example](examples/enterprise.parameters.json) covers dedicated platform subscriptions. The application module can also deploy into an already governed subscription:
 
-[![Deploy application landing zone](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2Fshadowarmor%2Felz%40d3ea03a5d460c01ecba6a4796660c34d9372ca03%2Fapplication.azuredeploy.json)
+[![Deploy application landing zone](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2Fshadowarmor%2Felz%40721ae7559e1db301e528b71601ae3d5e9b111782%2Fapplication.azuredeploy.json)
 
 That second button creates application resource groups and networking at subscription scope. It does **not** create management groups, move the subscription, or establish platform governance; place the subscription under the intended ELZ group first. Review existing policies and nonoverlapping CIDRs before use.
 
