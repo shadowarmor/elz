@@ -6,7 +6,7 @@
   "initiatives": [
     {
       "key": "mcsb",
-      "assignmentName": "elz-mcsb",
+      "assignmentSuffix": "mcsb",
       "displayName": "Microsoft cloud security benchmark",
       "id": "1f3afdf9-d0c9-4c3d-847f-89da613e70a8",
       "definitionVersion": "57.*.*",
@@ -15,7 +15,7 @@
     },
     {
       "key": "cis",
-      "assignmentName": "elz-cis-azure-3",
+      "assignmentSuffix": "cis-azure-3",
       "displayName": "CIS Azure Foundations v3.0.0",
       "id": "470a962c-86a0-433b-803a-3c176b5ce79c",
       "definitionVersion": "1.*.*",
@@ -24,7 +24,7 @@
     },
     {
       "key": "nis2",
-      "assignmentName": "elz-nis2",
+      "assignmentSuffix": "nis2",
       "displayName": "NIS2",
       "id": "32ff9e30-4725-4ca7-ba3a-904a7721ee87",
       "definitionVersion": "1.*.*",

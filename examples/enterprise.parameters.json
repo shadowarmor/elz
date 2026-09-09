@@ -13,6 +13,8 @@
     "nonproductionSubscriptionId": { "value": "REPLACE-WITH-NONPRODUCTION-SUBSCRIPTION-ID" },
     "applicationArchetype": { "value": "corp" },
     "createSecurityGroups": { "value": true },
+    "configureHierarchySettings": { "value": true },
+    "enableActivityLogCollection": { "value": true },
     "allowedLocations": { "value": ["southafricanorth", "southafricawest"] },
     "owner": { "value": "platform-team" },
     "costCenter": { "value": "shared-services" }

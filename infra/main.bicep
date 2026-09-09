@@ -97,6 +97,12 @@ param applicationTeamGroupObjectId string = ''
 @description('Optional existing Entra security GROUP object ID for the nonproduction workload resource group. Blank creates a separate nonproduction group when that landing zone is enabled.')
 param nonproductionApplicationTeamGroupObjectId string = ''
 
+@description('Set the tenant default management group for new subscriptions to Sandbox and require authorization to create management groups under the tenant root (CAF recommendations). Changes tenant-wide hierarchy settings; false leaves them untouched.')
+param configureHierarchySettings bool = false
+
+@description('Create a pay-as-you-go Log Analytics workspace in the management resource group and send every placed subscription\'s activity log to it. Activity-log ingestion and 90-day retention are free; any other data sent later is billed per GB.')
+param enableActivityLogCollection bool = false
+
 var prefix = toLower(organizationPrefix)
 var tags = {
   Owner: owner
@@ -116,6 +122,11 @@ var placements = concat(platformPlacements, [
 ], empty(nonproductionSubscriptionId) ? [] : [{ subscriptionId: nonproductionSubscriptionId, managementGroupName: '${prefix}-${applicationArchetype}' }])
 
 var subscriptionIds = map(placements, item => toLower(item.subscriptionId))
+// Every identifier the template forwards to ARM or Graph. Portal users skip the CLI preflight, so a malformed
+// optional ID must fail here rather than at subscription placement or role assignment.
+var optionalIdentifiers = filter([managementSubscriptionId, identitySubscriptionId, securitySubscriptionId, nonproductionSubscriptionId, platformAdminsGroupObjectId, securityReadersGroupObjectId, applicationTeamGroupObjectId, nonproductionApplicationTeamGroupObjectId], id => !empty(id))
+var memberIdentifiers = flatten(map(groupDefinitions, group => securityGroupMembers[?group.key] ?? []))
+var identifiers = concat([platformSubscriptionId, applicationSubscriptionId], optionalIdentifiers, securityGroupOwnerObjectIds, memberIdentifiers)
 // ARM validates dependency IDs before omitting condition=false deployments.
 // Keep the disabled module's scope valid; its condition still prevents any nonproduction resources.
 var nonproductionDeploymentSubscriptionId = empty(nonproductionSubscriptionId) ? applicationSubscriptionId : nonproductionSubscriptionId
@@ -131,6 +142,8 @@ module inputValidation './modules/input-validation.bicep' = {
   params: {
     // any defers the singleton true type check to ARM; false fails the nested deployment before mutations.
     subscriptionIdsAreDistinct: any(length(union(subscriptionIds, subscriptionIds)) == length(subscriptionIds))
+    // split() never throws, unlike substring() on short input, so malformed values fail cleanly as "not allowed".
+    identifiersAreGuids: any(length(filter(identifiers, id => length(id) != 36 || string(map(split(id, '-'), segment => length(segment))) != '[8,4,4,4,12]')) == 0)
     organizationPrefixIsValid: any(contains('abcdefghijklmnopqrstuvwxyz', substring(prefix, 0, 1)) && length(filter(range(0, length(prefix)), i => !contains('abcdefghijklmnopqrstuvwxyz0123456789-', substring(prefix, i, 1)))) == 0)
     resourceRegionIsAllowed: any(empty(allowedLocations) || contains(allowedLocations, location))
     networksArePrivateAndSized: any(length(filter(parsedNetworks, net => net.cidr < 16 || net.cidr > 24 || !(startsWith(net.network, '10.') || startsWith(net.network, '192.168.') || (startsWith(net.network, '172.') && int(split(net.network, '.')[1]) >= 16 && int(split(net.network, '.')[1]) <= 31)))) == 0)
@@ -139,13 +152,17 @@ module inputValidation './modules/input-validation.bicep' = {
   }
 }
 
+// Ordering: inputs -> Entra groups -> hierarchy -> placement -> resources -> governance.
+// Group creation is the only step whose client support varies (portal vs CLI), so it runs before any Azure
+// mutation: a Graph permission failure stops the deployment before a single management group exists.
 module hierarchy './modules/hierarchy.bicep' = {
   name: '${prefix}-hierarchy'
   params: {
     prefix: prefix
     organizationName: organizationName
+    configureHierarchySettings: configureHierarchySettings
   }
-  dependsOn: [inputValidation]
+  dependsOn: [inputValidation, securityGroups]
 }
 
 var groupDefinitions = [
@@ -188,9 +205,19 @@ module platform './platform.bicep' = {
     securitySubscriptionId: empty(securitySubscriptionId) ? platformSubscriptionId : securitySubscriptionId
     hubAddressPrefix: hubAddressPrefix
     tags: tags
+    deployLogAnalytics: enableActivityLogCollection
   }
   dependsOn: [placement]
 }
+
+module activityLogs './modules/activity-log.bicep' = [for (item, i) in placements: if (enableActivityLogCollection) {
+  name: '${prefix}-activity-log-${i}'
+  scope: subscription(item.subscriptionId)
+  params: {
+    prefix: prefix
+    workspaceId: platform.outputs.logAnalyticsWorkspaceId
+  }
+}]
 
 module application './application.bicep' = {
   name: '${prefix}-application-prod'
@@ -227,6 +254,7 @@ module governance './modules/governance.bicep' = {
   name: '${prefix}-governance'
   scope: managementGroup(prefix)
   params: {
+    prefix: prefix
     location: location
     allowedLocations: allowedLocations
     guardrailEffect: guardrailEffect
@@ -241,7 +269,7 @@ module governance './modules/governance.bicep' = {
 module corpGuardrails './modules/corp-guardrails.bicep' = {
   name: '${prefix}-corp-guardrails'
   scope: managementGroup('${prefix}-corp')
-  params: { effect: guardrailEffect }
+  params: { prefix: prefix, effect: guardrailEffect }
   dependsOn: [governance]
 }
 
@@ -262,6 +290,8 @@ output applicationVirtualNetworkId string = application.outputs.virtualNetworkId
 output applicationWorkloadResourceGroupId string = application.outputs.workloadResourceGroupId
 output nonproductionVirtualNetworkId string = !empty(nonproductionSubscriptionId) ? nonproduction!.outputs.virtualNetworkId : ''
 output complianceAssignmentIds array = governance.outputs.complianceAssignmentIds
+output logAnalyticsWorkspaceId string = platform.outputs.logAnalyticsWorkspaceId
+output hierarchySettingsConfigured bool = configureHierarchySettings
 output securityGroupObjectIds object = {
   platformAdmins: securityGroups[0].outputs.groupObjectId
   securityReaders: securityGroups[1].outputs.groupObjectId

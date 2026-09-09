@@ -13,11 +13,14 @@ param tags object
 param deployNetwork bool = false
 @description('Hub network CIDR.')
 param addressPrefix string = '10.0.0.0/16'
+@description('Create a pay-as-you-go Log Analytics workspace for activity-log collection.')
+param deployLogAnalytics bool = false
 
+var resourceTags = union(tags, { Environment: 'platform', LandingZone: purpose })
 resource group 'Microsoft.Resources/resourceGroups@2025-04-01' = {
   name: 'rg-${prefix}-${purpose}'
   location: location
-  tags: union(tags, { Environment: 'platform', LandingZone: purpose })
+  tags: resourceTags
 }
 module network './network.bicep' = if (deployNetwork) {
   name: '${prefix}-${purpose}-network'
@@ -26,8 +29,18 @@ module network './network.bicep' = if (deployNetwork) {
     name: 'vnet-${prefix}-hub'
     location: location
     addressPrefix: addressPrefix
-    tags: union(tags, { Environment: 'platform', LandingZone: purpose })
+    tags: resourceTags
+  }
+}
+module logAnalytics './log-analytics.bicep' = if (deployLogAnalytics) {
+  name: '${prefix}-${purpose}-logs'
+  scope: group
+  params: {
+    name: 'log-${prefix}-${purpose}'
+    location: location
+    tags: resourceTags
   }
 }
 output resourceGroupId string = group.id
 output virtualNetworkId string = deployNetwork ? network!.outputs.virtualNetworkId : ''
+output logAnalyticsWorkspaceId string = deployLogAnalytics ? logAnalytics!.outputs.workspaceId : ''

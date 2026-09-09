@@ -72,7 +72,8 @@ def validate(values):
     for key in ('owner', 'costCenter', 'organizationName', 'location'):
         if not isinstance(values.get(key), str) or not values[key].strip():
             errors.append(f'{key}: must not be blank.')
-    for key in ('enableMicrosoftCloudSecurityBenchmark', 'enableCis', 'enableNis2', 'createSecurityGroups'):
+    for key in ('enableMicrosoftCloudSecurityBenchmark', 'enableCis', 'enableNis2', 'createSecurityGroups',
+                'configureHierarchySettings', 'enableActivityLogCollection'):
         if not isinstance(values.get(key), bool):
             errors.append(f'{key}: must be a boolean.')
     allowed = values.get('allowedLocations', [])
@@ -122,6 +123,11 @@ def online(values, tenant_id):
     for location in [values['location'], *values['allowedLocations']]:
         if location not in locations:
             raise ValueError(f'Unknown Azure region: {location}')
+    def require_provider(key, namespace):
+        provider = az('provider', 'show', '--namespace', namespace, '--subscription', values[key])
+        if provider['registrationState'] != 'Registered':
+            raise ValueError(f'{key}: register {namespace} before deployment (see docs/bootstrap.md).')
+
     for key in SUBSCRIPTIONS:
         if not values.get(key):
             continue
@@ -129,11 +135,15 @@ def online(values, tenant_id):
         if account['tenantId'].lower() != tenant_id.lower() or account['state'] != 'Enabled':
             raise ValueError(f'{key} must be enabled in the target tenant.')
         resources = az('resource', 'list', '--subscription', values[key])
-        if resources:
-            raise ValueError(f'{key} contains {len(resources)} resources. Use empty subscriptions for initial deployment; review existing ELZ changes with what-if instead.')
-        provider = az('provider', 'show', '--namespace', 'Microsoft.Network', '--subscription', values[key])
-        if provider['registrationState'] != 'Registered':
-            raise ValueError(f'{key}: register Microsoft.Network before deployment (see docs/bootstrap.md).')
+        groups = az('group', 'list', '--subscription', values[key])
+        if resources or groups:
+            raise ValueError(f'{key} contains {len(resources)} resources and {len(groups)} resource groups. Use empty subscriptions for initial deployment; review existing ELZ changes with what-if instead.')
+        require_provider(key, 'Microsoft.Network')
+        if values['enableActivityLogCollection']:
+            require_provider(key, 'Microsoft.Insights')
+    if values['enableActivityLogCollection']:
+        # The workspace lands in the management scaffold, which shares the platform subscription when blank.
+        require_provider('managementSubscriptionId' if values.get('managementSubscriptionId') else 'platformSubscriptionId', 'Microsoft.OperationalInsights')
     for key in GROUPS:
         if values.get(key):
             group = az('ad', 'group', 'show', '--group', values[key])

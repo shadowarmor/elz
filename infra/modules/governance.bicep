@@ -1,5 +1,8 @@
 targetScope = 'managementGroup'
 
+@description('Organization prefix used in policy and deployment names. Assignment names at management group scope are limited to 24 characters.')
+@maxLength(12)
+param prefix string
 @description('Policy identity metadata location. Identities have no role assignments and cannot remediate resources.')
 param location string
 @description('Allowed regions; empty skips this assignment.')
@@ -20,7 +23,7 @@ var catalog = loadJsonContent('../policy-catalog.json')
 var switches = { mcsb: enableMicrosoftCloudSecurityBenchmark, cis: enableCis, nis2: enableNis2 }
 var enabledInitiatives = filter(catalog.initiatives, item => switches[item.key])
 resource compliance 'Microsoft.Authorization/policyAssignments@2025-03-01' = [for initiative in enabledInitiatives: {
-  name: initiative.assignmentName
+  name: '${prefix}-${initiative.assignmentSuffix}'
   location: location
   // Required for initiatives containing DINE/modify; deliberately receives no RBAC grants.
   identity: { type: 'SystemAssigned' }
@@ -36,7 +39,7 @@ resource compliance 'Microsoft.Authorization/policyAssignments@2025-03-01' = [fo
 }]
 
 resource locationsDefinition 'Microsoft.Authorization/policyDefinitions@2025-03-01' = {
-  name: 'elz-allowed-locations'
+  name: '${prefix}-allowed-locations'
   properties: {
     displayName: 'ELZ - Allowed resource locations'
     policyType: 'Custom'
@@ -59,7 +62,7 @@ resource locationsDefinition 'Microsoft.Authorization/policyDefinitions@2025-03-
   }
 }
 resource locations 'Microsoft.Authorization/policyAssignments@2025-03-01' = if (!empty(allowedLocations)) {
-  name: 'elz-locations'
+  name: '${prefix}-locations'
   properties: {
     displayName: 'ELZ - Allowed resource locations'
     policyDefinitionId: locationsDefinition.id
@@ -68,7 +71,7 @@ resource locations 'Microsoft.Authorization/policyAssignments@2025-03-01' = if (
   }
 }
 resource classicDefinition 'Microsoft.Authorization/policyDefinitions@2025-03-01' = {
-  name: 'elz-no-classic'
+  name: '${prefix}-no-classic'
   properties: {
     displayName: 'ELZ - Restrict classic resource providers'
     policyType: 'Custom'
@@ -86,7 +89,7 @@ resource classicDefinition 'Microsoft.Authorization/policyDefinitions@2025-03-01
   }
 }
 resource classic 'Microsoft.Authorization/policyAssignments@2025-03-01' = {
-  name: 'elz-no-classic'
+  name: '${prefix}-no-classic'
   properties: {
     displayName: 'ELZ - Restrict classic resources'
     policyDefinitionId: classicDefinition.id
@@ -95,7 +98,7 @@ resource classic 'Microsoft.Authorization/policyAssignments@2025-03-01' = {
   }
 }
 resource tagsDefinition 'Microsoft.Authorization/policyDefinitions@2025-03-01' = {
-  name: 'elz-resource-group-tags'
+  name: '${prefix}-resource-group-tags'
   properties: {
     displayName: 'ELZ - Audit resource group ownership and cost tags'
     policyType: 'Custom'
@@ -120,7 +123,7 @@ resource tagsDefinition 'Microsoft.Authorization/policyDefinitions@2025-03-01' =
   }
 }
 resource tagAudit 'Microsoft.Authorization/policyAssignments@2025-03-01' = {
-  name: 'elz-rg-tags'
+  name: '${prefix}-rg-tags'
   properties: {
     displayName: 'ELZ - Audit resource group ownership and cost tags'
     policyDefinitionId: tagsDefinition.id
@@ -129,7 +132,7 @@ resource tagAudit 'Microsoft.Authorization/policyAssignments@2025-03-01' = {
 }
 var securityRoles = ['acdd72a7-3385-48ef-bd42-f606fba81ae7', '39bc4728-0917-49c7-9d2c-d95423bc2eb4']
 module securityReaders './group-role.bicep' = [for (roleId, i) in securityRoles: if (!empty(securityReadersGroupObjectId)) {
-  name: 'elz-security-reader-${i}'
+  name: '${prefix}-security-reader-${i}'
   params: { principalId: securityReadersGroupObjectId, roleDefinitionId: roleId }
 }]
 output complianceAssignmentIds array = [for (initiative, i) in enabledInitiatives: compliance[i].id]

@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "10260829488118776234"
+      "templateHash": "3319812665934366591"
     }
   },
   "parameters": {
@@ -218,6 +218,20 @@
       "metadata": {
         "description": "Optional existing Entra security GROUP object ID for the nonproduction workload resource group. Blank creates a separate nonproduction group when that landing zone is enabled."
       }
+    },
+    "configureHierarchySettings": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Set the tenant default management group for new subscriptions to Sandbox and require authorization to create management groups under the tenant root (CAF recommendations). Changes tenant-wide hierarchy settings; false leaves them untouched."
+      }
+    },
+    "enableActivityLogCollection": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Create a pay-as-you-go Log Analytics workspace in the management resource group and send every placed subscription's activity log to it. Activity-log ingestion and 90-day retention are free; any other data sent later is billed per GB."
+      }
     }
   },
   "variables": {
@@ -232,6 +246,9 @@
     "platformPlacements": "[concat(createArray(createObject('subscriptionId', parameters('platformSubscriptionId'), 'managementGroupName', format('{0}-{1}', variables('prefix'), if(variables('sharedPlatform'), 'platform', 'connectivity')))), if(empty(parameters('managementSubscriptionId')), createArray(), createArray(createObject('subscriptionId', parameters('managementSubscriptionId'), 'managementGroupName', format('{0}-management', variables('prefix'))))), if(empty(parameters('identitySubscriptionId')), createArray(), createArray(createObject('subscriptionId', parameters('identitySubscriptionId'), 'managementGroupName', format('{0}-identity', variables('prefix'))))), if(empty(parameters('securitySubscriptionId')), createArray(), createArray(createObject('subscriptionId', parameters('securitySubscriptionId'), 'managementGroupName', format('{0}-security', variables('prefix'))))))]",
     "placements": "[concat(variables('platformPlacements'), createArray(createObject('subscriptionId', parameters('applicationSubscriptionId'), 'managementGroupName', format('{0}-{1}', variables('prefix'), parameters('applicationArchetype')))), if(empty(parameters('nonproductionSubscriptionId')), createArray(), createArray(createObject('subscriptionId', parameters('nonproductionSubscriptionId'), 'managementGroupName', format('{0}-{1}', variables('prefix'), parameters('applicationArchetype'))))))]",
     "subscriptionIds": "[map(variables('placements'), lambda('item', toLower(lambdaVariables('item').subscriptionId)))]",
+    "optionalIdentifiers": "[filter(createArray(parameters('managementSubscriptionId'), parameters('identitySubscriptionId'), parameters('securitySubscriptionId'), parameters('nonproductionSubscriptionId'), parameters('platformAdminsGroupObjectId'), parameters('securityReadersGroupObjectId'), parameters('applicationTeamGroupObjectId'), parameters('nonproductionApplicationTeamGroupObjectId')), lambda('id', not(empty(lambdaVariables('id')))))]",
+    "memberIdentifiers": "[flatten(map(variables('groupDefinitions'), lambda('group', coalesce(tryGet(parameters('securityGroupMembers'), lambdaVariables('group').key), createArray()))))]",
+    "identifiers": "[concat(createArray(parameters('platformSubscriptionId'), parameters('applicationSubscriptionId')), variables('optionalIdentifiers'), parameters('securityGroupOwnerObjectIds'), variables('memberIdentifiers'))]",
     "nonproductionDeploymentSubscriptionId": "[if(empty(parameters('nonproductionSubscriptionId')), parameters('applicationSubscriptionId'), parameters('nonproductionSubscriptionId'))]",
     "cidrs": "[concat(createArray(parameters('hubAddressPrefix'), parameters('applicationAddressPrefix')), if(empty(parameters('nonproductionSubscriptionId')), createArray(), createArray(parameters('nonproductionAddressPrefix'))))]",
     "parsedNetworks": "[map(variables('cidrs'), lambda('cidr', parseCidr(lambdaVariables('cidr'))))]",
@@ -288,6 +305,9 @@
           "subscriptionIdsAreDistinct": {
             "value": "[equals(length(union(variables('subscriptionIds'), variables('subscriptionIds'))), length(variables('subscriptionIds')))]"
           },
+          "identifiersAreGuids": {
+            "value": "[equals(length(filter(variables('identifiers'), lambda('id', or(not(equals(length(lambdaVariables('id')), 36)), not(equals(string(map(split(lambdaVariables('id'), '-'), lambda('segment', length(lambdaVariables('segment'))))), '[8,4,4,4,12]')))))), 0)]"
+          },
           "organizationPrefixIsValid": {
             "value": "[and(contains('abcdefghijklmnopqrstuvwxyz', substring(variables('prefix'), 0, 1)), equals(length(filter(range(0, length(variables('prefix'))), lambda('i', not(contains('abcdefghijklmnopqrstuvwxyz0123456789-', substring(variables('prefix'), lambdaVariables('i'), 1)))))), 0))]"
           },
@@ -311,7 +331,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "7274006275432444754"
+              "templateHash": "15076188688000048074"
             }
           },
           "parameters": {
@@ -322,6 +342,15 @@
               ],
               "metadata": {
                 "description": "Must be true: each explicitly supplied subscription GUID must be unique. Use blanks to share platform services."
+              }
+            },
+            "identifiersAreGuids": {
+              "type": "bool",
+              "allowedValues": [
+                true
+              ],
+              "metadata": {
+                "description": "Must be true: every supplied subscription ID, group object ID, owner ID, and member ID must be a hyphenated GUID (8-4-4-4-12)."
               }
             },
             "organizationPrefixIsValid": {
@@ -374,7 +403,7 @@
           "outputs": {
             "valid": {
               "type": "bool",
-              "value": "[and(and(and(and(and(parameters('subscriptionIdsAreDistinct'), parameters('organizationPrefixIsValid')), parameters('resourceRegionIsAllowed')), parameters('networksArePrivateAndSized')), parameters('networksAreCanonical')), parameters('networksDoNotOverlap'))]"
+              "value": "[and(and(and(and(and(and(parameters('subscriptionIdsAreDistinct'), parameters('identifiersAreGuids')), parameters('organizationPrefixIsValid')), parameters('resourceRegionIsAllowed')), parameters('networksArePrivateAndSized')), parameters('networksAreCanonical')), parameters('networksDoNotOverlap'))]"
             }
           }
         }
@@ -396,6 +425,9 @@
           },
           "organizationName": {
             "value": "[parameters('organizationName')]"
+          },
+          "configureHierarchySettings": {
+            "value": "[parameters('configureHierarchySettings')]"
           }
         },
         "template": {
@@ -405,7 +437,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "5284343311777171171"
+              "templateHash": "11461128199435588403"
             }
           },
           "parameters": {
@@ -419,6 +451,13 @@
               "type": "string",
               "metadata": {
                 "description": "Organization display name."
+              }
+            },
+            "configureHierarchySettings": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Set the tenant default management group for new subscriptions to Sandbox and require authorization to create management groups under the tenant root. False leaves tenant hierarchy settings untouched."
               }
             }
           },
@@ -526,18 +565,36 @@
               "dependsOn": [
                 "[tenantResourceId('Microsoft.Management/managementGroups', format('{0}-{1}', parameters('prefix'), variables('topGroups')[1].suffix))]"
               ]
+            },
+            {
+              "condition": "[parameters('configureHierarchySettings')]",
+              "type": "Microsoft.Management/managementGroups/settings",
+              "apiVersion": "2023-04-01",
+              "name": "[format('{0}/{1}', tenant().tenantId, 'default')]",
+              "properties": {
+                "defaultManagementGroup": "[tenantResourceId('Microsoft.Management/managementGroups', format('{0}-{1}', parameters('prefix'), variables('topGroups')[2].suffix))]",
+                "requireAuthorizationForGroupCreation": true
+              },
+              "dependsOn": [
+                "[tenantResourceId('Microsoft.Management/managementGroups', format('{0}-{1}', parameters('prefix'), variables('topGroups')[2].suffix))]"
+              ]
             }
           ],
           "outputs": {
             "rootManagementGroupId": {
               "type": "string",
               "value": "[tenantResourceId('Microsoft.Management/managementGroups', parameters('prefix'))]"
+            },
+            "sandboxManagementGroupId": {
+              "type": "string",
+              "value": "[tenantResourceId('Microsoft.Management/managementGroups', format('{0}-{1}', parameters('prefix'), variables('topGroups')[2].suffix))]"
             }
           }
         }
       },
       "dependsOn": [
-        "inputValidation"
+        "inputValidation",
+        "securityGroups"
       ]
     },
     "securityGroups": {
@@ -782,6 +839,9 @@
           },
           "tags": {
             "value": "[variables('tags')]"
+          },
+          "deployLogAnalytics": {
+            "value": "[parameters('enableActivityLogCollection')]"
           }
         },
         "template": {
@@ -791,7 +851,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "9088508207119056484"
+              "templateHash": "14605610508922765495"
             }
           },
           "parameters": {
@@ -841,6 +901,13 @@
               "type": "object",
               "metadata": {
                 "description": "Common ownership and cost tags."
+              }
+            },
+            "deployLogAnalytics": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Create the management Log Analytics workspace for activity-log collection."
               }
             }
           },
@@ -899,7 +966,7 @@
                     "_generator": {
                       "name": "bicep",
                       "version": "0.47.16.16243",
-                      "templateHash": "6484827740646876141"
+                      "templateHash": "12748171014224845261"
                     }
                   },
                   "parameters": {
@@ -946,7 +1013,17 @@
                       "metadata": {
                         "description": "Hub network CIDR."
                       }
+                    },
+                    "deployLogAnalytics": {
+                      "type": "bool",
+                      "defaultValue": false,
+                      "metadata": {
+                        "description": "Create a pay-as-you-go Log Analytics workspace for activity-log collection."
+                      }
                     }
+                  },
+                  "variables": {
+                    "resourceTags": "[union(parameters('tags'), createObject('Environment', 'platform', 'LandingZone', parameters('purpose')))]"
                   },
                   "resources": [
                     {
@@ -954,7 +1031,7 @@
                       "apiVersion": "2025-04-01",
                       "name": "[format('rg-{0}-{1}', parameters('prefix'), parameters('purpose'))]",
                       "location": "[parameters('location')]",
-                      "tags": "[union(parameters('tags'), createObject('Environment', 'platform', 'LandingZone', parameters('purpose')))]"
+                      "tags": "[variables('resourceTags')]"
                     },
                     {
                       "condition": "[parameters('deployNetwork')]",
@@ -978,7 +1055,7 @@
                             "value": "[parameters('addressPrefix')]"
                           },
                           "tags": {
-                            "value": "[union(parameters('tags'), createObject('Environment', 'platform', 'LandingZone', parameters('purpose')))]"
+                            "value": "[variables('resourceTags')]"
                           }
                         },
                         "template": {
@@ -1125,6 +1202,90 @@
                       "dependsOn": [
                         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}', parameters('prefix'), parameters('purpose')))]"
                       ]
+                    },
+                    {
+                      "condition": "[parameters('deployLogAnalytics')]",
+                      "type": "Microsoft.Resources/deployments",
+                      "apiVersion": "2025-04-01",
+                      "name": "[format('{0}-{1}-logs', parameters('prefix'), parameters('purpose'))]",
+                      "resourceGroup": "[format('rg-{0}-{1}', parameters('prefix'), parameters('purpose'))]",
+                      "properties": {
+                        "expressionEvaluationOptions": {
+                          "scope": "inner"
+                        },
+                        "mode": "Incremental",
+                        "parameters": {
+                          "name": {
+                            "value": "[format('log-{0}-{1}', parameters('prefix'), parameters('purpose'))]"
+                          },
+                          "location": {
+                            "value": "[parameters('location')]"
+                          },
+                          "tags": {
+                            "value": "[variables('resourceTags')]"
+                          }
+                        },
+                        "template": {
+                          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                          "contentVersion": "1.0.0.0",
+                          "metadata": {
+                            "_generator": {
+                              "name": "bicep",
+                              "version": "0.47.16.16243",
+                              "templateHash": "11770997034811412853"
+                            }
+                          },
+                          "parameters": {
+                            "name": {
+                              "type": "string",
+                              "metadata": {
+                                "description": "Workspace name."
+                              }
+                            },
+                            "location": {
+                              "type": "string",
+                              "metadata": {
+                                "description": "Resource region."
+                              }
+                            },
+                            "tags": {
+                              "type": "object",
+                              "metadata": {
+                                "description": "Resource tags."
+                              }
+                            }
+                          },
+                          "resources": [
+                            {
+                              "type": "Microsoft.OperationalInsights/workspaces",
+                              "apiVersion": "2025-02-01",
+                              "name": "[parameters('name')]",
+                              "location": "[parameters('location')]",
+                              "tags": "[parameters('tags')]",
+                              "properties": {
+                                "sku": {
+                                  "name": "PerGB2018"
+                                },
+                                "retentionInDays": 30,
+                                "features": {
+                                  "enableLogAccessUsingOnlyResourcePermissions": true
+                                },
+                                "publicNetworkAccessForIngestion": "Enabled",
+                                "publicNetworkAccessForQuery": "Enabled"
+                              }
+                            }
+                          ],
+                          "outputs": {
+                            "workspaceId": {
+                              "type": "string",
+                              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('name'))]"
+                            }
+                          }
+                        }
+                      },
+                      "dependsOn": [
+                        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}', parameters('prefix'), parameters('purpose')))]"
+                      ]
                     }
                   ],
                   "outputs": {
@@ -1135,6 +1296,10 @@
                     "virtualNetworkId": {
                       "type": "string",
                       "value": "[if(parameters('deployNetwork'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}', parameters('prefix'), parameters('purpose'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('purpose'))), '2025-04-01').outputs.virtualNetworkId.value, '')]"
+                    },
+                    "logAnalyticsWorkspaceId": {
+                      "type": "string",
+                      "value": "[if(parameters('deployLogAnalytics'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}', parameters('prefix'), parameters('purpose'))), 'Microsoft.Resources/deployments', format('{0}-{1}-logs', parameters('prefix'), parameters('purpose'))), '2025-04-01').outputs.workspaceId.value, '')]"
                     }
                   }
                 }
@@ -1167,6 +1332,9 @@
                   },
                   "tags": {
                     "value": "[parameters('tags')]"
+                  },
+                  "deployLogAnalytics": {
+                    "value": "[and(parameters('deployLogAnalytics'), equals(variables('serviceSubscriptions')[copyIndex()].purpose, 'management'))]"
                   }
                 },
                 "template": {
@@ -1176,7 +1344,7 @@
                     "_generator": {
                       "name": "bicep",
                       "version": "0.47.16.16243",
-                      "templateHash": "6484827740646876141"
+                      "templateHash": "12748171014224845261"
                     }
                   },
                   "parameters": {
@@ -1223,7 +1391,17 @@
                       "metadata": {
                         "description": "Hub network CIDR."
                       }
+                    },
+                    "deployLogAnalytics": {
+                      "type": "bool",
+                      "defaultValue": false,
+                      "metadata": {
+                        "description": "Create a pay-as-you-go Log Analytics workspace for activity-log collection."
+                      }
                     }
+                  },
+                  "variables": {
+                    "resourceTags": "[union(parameters('tags'), createObject('Environment', 'platform', 'LandingZone', parameters('purpose')))]"
                   },
                   "resources": [
                     {
@@ -1231,7 +1409,7 @@
                       "apiVersion": "2025-04-01",
                       "name": "[format('rg-{0}-{1}', parameters('prefix'), parameters('purpose'))]",
                       "location": "[parameters('location')]",
-                      "tags": "[union(parameters('tags'), createObject('Environment', 'platform', 'LandingZone', parameters('purpose')))]"
+                      "tags": "[variables('resourceTags')]"
                     },
                     {
                       "condition": "[parameters('deployNetwork')]",
@@ -1255,7 +1433,7 @@
                             "value": "[parameters('addressPrefix')]"
                           },
                           "tags": {
-                            "value": "[union(parameters('tags'), createObject('Environment', 'platform', 'LandingZone', parameters('purpose')))]"
+                            "value": "[variables('resourceTags')]"
                           }
                         },
                         "template": {
@@ -1402,6 +1580,90 @@
                       "dependsOn": [
                         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}', parameters('prefix'), parameters('purpose')))]"
                       ]
+                    },
+                    {
+                      "condition": "[parameters('deployLogAnalytics')]",
+                      "type": "Microsoft.Resources/deployments",
+                      "apiVersion": "2025-04-01",
+                      "name": "[format('{0}-{1}-logs', parameters('prefix'), parameters('purpose'))]",
+                      "resourceGroup": "[format('rg-{0}-{1}', parameters('prefix'), parameters('purpose'))]",
+                      "properties": {
+                        "expressionEvaluationOptions": {
+                          "scope": "inner"
+                        },
+                        "mode": "Incremental",
+                        "parameters": {
+                          "name": {
+                            "value": "[format('log-{0}-{1}', parameters('prefix'), parameters('purpose'))]"
+                          },
+                          "location": {
+                            "value": "[parameters('location')]"
+                          },
+                          "tags": {
+                            "value": "[variables('resourceTags')]"
+                          }
+                        },
+                        "template": {
+                          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                          "contentVersion": "1.0.0.0",
+                          "metadata": {
+                            "_generator": {
+                              "name": "bicep",
+                              "version": "0.47.16.16243",
+                              "templateHash": "11770997034811412853"
+                            }
+                          },
+                          "parameters": {
+                            "name": {
+                              "type": "string",
+                              "metadata": {
+                                "description": "Workspace name."
+                              }
+                            },
+                            "location": {
+                              "type": "string",
+                              "metadata": {
+                                "description": "Resource region."
+                              }
+                            },
+                            "tags": {
+                              "type": "object",
+                              "metadata": {
+                                "description": "Resource tags."
+                              }
+                            }
+                          },
+                          "resources": [
+                            {
+                              "type": "Microsoft.OperationalInsights/workspaces",
+                              "apiVersion": "2025-02-01",
+                              "name": "[parameters('name')]",
+                              "location": "[parameters('location')]",
+                              "tags": "[parameters('tags')]",
+                              "properties": {
+                                "sku": {
+                                  "name": "PerGB2018"
+                                },
+                                "retentionInDays": 30,
+                                "features": {
+                                  "enableLogAccessUsingOnlyResourcePermissions": true
+                                },
+                                "publicNetworkAccessForIngestion": "Enabled",
+                                "publicNetworkAccessForQuery": "Enabled"
+                              }
+                            }
+                          ],
+                          "outputs": {
+                            "workspaceId": {
+                              "type": "string",
+                              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('name'))]"
+                            }
+                          }
+                        }
+                      },
+                      "dependsOn": [
+                        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}', parameters('prefix'), parameters('purpose')))]"
+                      ]
                     }
                   ],
                   "outputs": {
@@ -1412,6 +1674,10 @@
                     "virtualNetworkId": {
                       "type": "string",
                       "value": "[if(parameters('deployNetwork'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}', parameters('prefix'), parameters('purpose'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('purpose'))), '2025-04-01').outputs.virtualNetworkId.value, '')]"
+                    },
+                    "logAnalyticsWorkspaceId": {
+                      "type": "string",
+                      "value": "[if(parameters('deployLogAnalytics'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}', parameters('prefix'), parameters('purpose'))), 'Microsoft.Resources/deployments', format('{0}-{1}-logs', parameters('prefix'), parameters('purpose'))), '2025-04-01').outputs.workspaceId.value, '')]"
                     }
                   }
                 }
@@ -1422,12 +1688,108 @@
             "hubVirtualNetworkId": {
               "type": "string",
               "value": "[reference(subscriptionResourceId(parameters('connectivitySubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-connectivity', parameters('prefix'))), '2025-04-01').outputs.virtualNetworkId.value]"
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "value": "[reference(subscriptionResourceId(variables('serviceSubscriptions')[0].subscriptionId, 'Microsoft.Resources/deployments', format('{0}-{1}', parameters('prefix'), variables('serviceSubscriptions')[0].purpose)), '2025-04-01').outputs.logAnalyticsWorkspaceId.value]"
             }
           }
         }
       },
       "dependsOn": [
         "placement"
+      ]
+    },
+    "activityLogs": {
+      "copy": {
+        "name": "activityLogs",
+        "count": "[length(variables('placements'))]"
+      },
+      "condition": "[parameters('enableActivityLogCollection')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-activity-log-{1}', variables('prefix'), copyIndex())]",
+      "subscriptionId": "[variables('placements')[copyIndex()].subscriptionId]",
+      "location": "[deployment().location]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "prefix": {
+            "value": "[variables('prefix')]"
+          },
+          "workspaceId": {
+            "value": "[reference('platform').outputs.logAnalyticsWorkspaceId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "5566378840203112329"
+            }
+          },
+          "parameters": {
+            "prefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Organization prefix used in the diagnostic setting name."
+              }
+            },
+            "workspaceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics workspace resource ID receiving this subscription's activity log. May live in another subscription of the same tenant."
+              }
+            }
+          },
+          "variables": {
+            "categories": [
+              "Administrative",
+              "Security",
+              "ServiceHealth",
+              "Alert",
+              "Recommendation",
+              "Policy",
+              "Autoscale",
+              "ResourceHealth"
+            ]
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Insights/diagnosticSettings",
+              "apiVersion": "2021-05-01-preview",
+              "name": "[format('{0}-activity-log', parameters('prefix'))]",
+              "properties": {
+                "copy": [
+                  {
+                    "name": "logs",
+                    "count": "[length(variables('categories'))]",
+                    "input": {
+                      "category": "[variables('categories')[copyIndex('logs')]]",
+                      "enabled": true
+                    }
+                  }
+                ],
+                "workspaceId": "[parameters('workspaceId')]"
+              }
+            }
+          ],
+          "outputs": {
+            "diagnosticSettingId": {
+              "type": "string",
+              "value": "[subscriptionResourceId('Microsoft.Insights/diagnosticSettings', format('{0}-activity-log', parameters('prefix')))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "platform"
       ]
     },
     "application": {
@@ -2291,6 +2653,9 @@
         },
         "mode": "Incremental",
         "parameters": {
+          "prefix": {
+            "value": "[variables('prefix')]"
+          },
           "location": {
             "value": "[parameters('location')]"
           },
@@ -2320,10 +2685,17 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "16719775731150918519"
+              "templateHash": "16909609772914790374"
             }
           },
           "parameters": {
+            "prefix": {
+              "type": "string",
+              "maxLength": 12,
+              "metadata": {
+                "description": "Organization prefix used in policy and deployment names. Assignment names at management group scope are limited to 24 characters."
+              }
+            },
             "location": {
               "type": "string",
               "metadata": {
@@ -2380,7 +2752,7 @@
               "initiatives": [
                 {
                   "key": "mcsb",
-                  "assignmentName": "elz-mcsb",
+                  "assignmentSuffix": "mcsb",
                   "displayName": "Microsoft cloud security benchmark",
                   "id": "1f3afdf9-d0c9-4c3d-847f-89da613e70a8",
                   "definitionVersion": "57.*.*",
@@ -2389,7 +2761,7 @@
                 },
                 {
                   "key": "cis",
-                  "assignmentName": "elz-cis-azure-3",
+                  "assignmentSuffix": "cis-azure-3",
                   "displayName": "CIS Azure Foundations v3.0.0",
                   "id": "470a962c-86a0-433b-803a-3c176b5ce79c",
                   "definitionVersion": "1.*.*",
@@ -2398,7 +2770,7 @@
                 },
                 {
                   "key": "nis2",
-                  "assignmentName": "elz-nis2",
+                  "assignmentSuffix": "nis2",
                   "displayName": "NIS2",
                   "id": "32ff9e30-4725-4ca7-ba3a-904a7721ee87",
                   "definitionVersion": "1.*.*",
@@ -2427,7 +2799,7 @@
               },
               "type": "Microsoft.Authorization/policyAssignments",
               "apiVersion": "2025-03-01",
-              "name": "[variables('enabledInitiatives')[copyIndex()].assignmentName]",
+              "name": "[format('{0}-{1}', parameters('prefix'), variables('enabledInitiatives')[copyIndex()].assignmentSuffix)]",
               "location": "[parameters('location')]",
               "identity": {
                 "type": "SystemAssigned"
@@ -2453,7 +2825,7 @@
             {
               "type": "Microsoft.Authorization/policyDefinitions",
               "apiVersion": "2025-03-01",
-              "name": "elz-allowed-locations",
+              "name": "[format('{0}-allowed-locations', parameters('prefix'))]",
               "properties": {
                 "displayName": "ELZ - Allowed resource locations",
                 "policyType": "Custom",
@@ -2506,10 +2878,10 @@
               "condition": "[not(empty(parameters('allowedLocations')))]",
               "type": "Microsoft.Authorization/policyAssignments",
               "apiVersion": "2025-03-01",
-              "name": "elz-locations",
+              "name": "[format('{0}-locations', parameters('prefix'))]",
               "properties": {
                 "displayName": "ELZ - Allowed resource locations",
-                "policyDefinitionId": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', 'elz-allowed-locations')]",
+                "policyDefinitionId": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', format('{0}-allowed-locations', parameters('prefix')))]",
                 "enforcementMode": "Default",
                 "parameters": {
                   "allowedLocations": {
@@ -2521,13 +2893,13 @@
                 }
               },
               "dependsOn": [
-                "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', 'elz-allowed-locations')]"
+                "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', format('{0}-allowed-locations', parameters('prefix')))]"
               ]
             },
             {
               "type": "Microsoft.Authorization/policyDefinitions",
               "apiVersion": "2025-03-01",
-              "name": "elz-no-classic",
+              "name": "[format('{0}-no-classic', parameters('prefix'))]",
               "properties": {
                 "displayName": "ELZ - Restrict classic resource providers",
                 "policyType": "Custom",
@@ -2572,10 +2944,10 @@
             {
               "type": "Microsoft.Authorization/policyAssignments",
               "apiVersion": "2025-03-01",
-              "name": "elz-no-classic",
+              "name": "[format('{0}-no-classic', parameters('prefix'))]",
               "properties": {
                 "displayName": "ELZ - Restrict classic resources",
-                "policyDefinitionId": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', 'elz-no-classic')]",
+                "policyDefinitionId": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', format('{0}-no-classic', parameters('prefix')))]",
                 "enforcementMode": "Default",
                 "parameters": {
                   "effect": {
@@ -2584,13 +2956,13 @@
                 }
               },
               "dependsOn": [
-                "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', 'elz-no-classic')]"
+                "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', format('{0}-no-classic', parameters('prefix')))]"
               ]
             },
             {
               "type": "Microsoft.Authorization/policyDefinitions",
               "apiVersion": "2025-03-01",
-              "name": "elz-resource-group-tags",
+              "name": "[format('{0}-resource-group-tags', parameters('prefix'))]",
               "properties": {
                 "displayName": "ELZ - Audit resource group ownership and cost tags",
                 "policyType": "Custom",
@@ -2645,14 +3017,14 @@
             {
               "type": "Microsoft.Authorization/policyAssignments",
               "apiVersion": "2025-03-01",
-              "name": "elz-rg-tags",
+              "name": "[format('{0}-rg-tags', parameters('prefix'))]",
               "properties": {
                 "displayName": "ELZ - Audit resource group ownership and cost tags",
-                "policyDefinitionId": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', 'elz-resource-group-tags')]",
+                "policyDefinitionId": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', format('{0}-resource-group-tags', parameters('prefix')))]",
                 "enforcementMode": "Default"
               },
               "dependsOn": [
-                "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', 'elz-resource-group-tags')]"
+                "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', format('{0}-resource-group-tags', parameters('prefix')))]"
               ]
             },
             {
@@ -2663,7 +3035,7 @@
               "condition": "[not(empty(parameters('securityReadersGroupObjectId')))]",
               "type": "Microsoft.Resources/deployments",
               "apiVersion": "2025-04-01",
-              "name": "[format('elz-security-reader-{0}', copyIndex())]",
+              "name": "[format('{0}-security-reader-{1}', parameters('prefix'), copyIndex())]",
               "location": "[deployment().location]",
               "properties": {
                 "expressionEvaluationOptions": {
@@ -2723,7 +3095,7 @@
               "type": "array",
               "copy": {
                 "count": "[length(variables('enabledInitiatives'))]",
-                "input": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyAssignments', variables('enabledInitiatives')[copyIndex()].assignmentName)]"
+                "input": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyAssignments', format('{0}-{1}', parameters('prefix'), variables('enabledInitiatives')[copyIndex()].assignmentSuffix))]"
               }
             }
           }
@@ -2748,6 +3120,9 @@
         },
         "mode": "Incremental",
         "parameters": {
+          "prefix": {
+            "value": "[variables('prefix')]"
+          },
           "effect": {
             "value": "[parameters('guardrailEffect')]"
           }
@@ -2759,10 +3134,17 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "15619675599239018827"
+              "templateHash": "9967912527087561629"
             }
           },
           "parameters": {
+            "prefix": {
+              "type": "string",
+              "maxLength": 12,
+              "metadata": {
+                "description": "Organization prefix used in policy resource names. Assignment names at management group scope are limited to 24 characters."
+              }
+            },
             "effect": {
               "type": "string",
               "defaultValue": "Deny",
@@ -2779,7 +3161,7 @@
             {
               "type": "Microsoft.Authorization/policyDefinitions",
               "apiVersion": "2025-03-01",
-              "name": "elz-corp-no-public-ip",
+              "name": "[format('{0}-corp-no-public-ip', parameters('prefix'))]",
               "properties": {
                 "displayName": "ELZ Corp - Restrict public IP resources",
                 "description": "Corp networks use centrally managed connectivity. This does not cover public endpoints on PaaS services.",
@@ -2816,10 +3198,10 @@
             {
               "type": "Microsoft.Authorization/policyAssignments",
               "apiVersion": "2025-03-01",
-              "name": "elz-corp-no-public-ip",
+              "name": "[format('{0}-corp-no-pip', parameters('prefix'))]",
               "properties": {
                 "displayName": "ELZ Corp - Restrict public IP resources",
-                "policyDefinitionId": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', 'elz-corp-no-public-ip')]",
+                "policyDefinitionId": "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', format('{0}-corp-no-public-ip', parameters('prefix')))]",
                 "enforcementMode": "Default",
                 "parameters": {
                   "effect": {
@@ -2833,7 +3215,7 @@
                 ]
               },
               "dependsOn": [
-                "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', 'elz-corp-no-public-ip')]"
+                "[extensionResourceId(managementGroup().id, 'Microsoft.Authorization/policyDefinitions', format('{0}-corp-no-public-ip', parameters('prefix')))]"
               ]
             }
           ]
@@ -2935,6 +3317,14 @@
     "complianceAssignmentIds": {
       "type": "array",
       "value": "[reference('governance').outputs.complianceAssignmentIds.value]"
+    },
+    "logAnalyticsWorkspaceId": {
+      "type": "string",
+      "value": "[reference('platform').outputs.logAnalyticsWorkspaceId.value]"
+    },
+    "hierarchySettingsConfigured": {
+      "type": "bool",
+      "value": "[parameters('configureHierarchySettings')]"
     },
     "securityGroupObjectIds": {
       "type": "object",

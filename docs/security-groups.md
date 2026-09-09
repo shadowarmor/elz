@@ -13,7 +13,7 @@ The tenant template creates the groups below by default and passes their actual 
 
 ## Type, owners, and members
 
-Groups are security-enabled, non-mail-enabled, static-membership groups. They have no Entra directory roles, dynamic membership, or PIM configuration. Standard Azure RBAC group assignment does not require setting `isAssignableToRole`; that property is omitted, avoiding the extra privilege/licensing associated with directory-role-assignable groups.
+Groups are security-enabled, non-mail-enabled, static-membership groups. They have no Entra directory roles, dynamic membership, or PIM configuration. Standard Azure RBAC group assignment does not require setting `isAssignableToRole`; that property is omitted, avoiding the extra privilege/licensing associated with directory-role-assignable groups. The Cloud Adoption Framework recommends that platform-team access at management-group scope be granted just in time through Privileged Identity Management; the standing Contributor assignment for the platform administrators group is a bootstrap baseline to move behind PIM once it is licensed and configured.
 
 Creation supplies an immutable `uniqueName` equal to the group name. Repeating deployment with the same prefix targets the same group. Display names are not reliable identity keys: if a manually created group already has that display name, supply its object ID to reuse it. Otherwise Graph can create a second group with the same display name and a different uniqueName.
 
