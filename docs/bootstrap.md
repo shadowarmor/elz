@@ -31,7 +31,7 @@ $deployerObjectId = az ad signed-in-user show --query id --output tsv
 az role assignment create --assignee-object-id $deployerObjectId --assignee-principal-type User --role '8e3af657-a8ff-443c-a75c-2fe8c4bcb635' --scope / --query id --output tsv
 ```
 
-Your organization may instead implement a reviewed custom deployment role plus appropriately scoped role-assignment permissions. Ensure it includes tenant `Microsoft.Resources/deployments/*`, management-group create/move operations, subscription association permissions at old/new parents, policy writes, and every nested resource operation. ELZ does not automatically grant permanent Owner or invent a custom deployment role.
+Your organization may instead implement a reviewed custom deployment role plus appropriately scoped role-assignment permissions. Ensure it includes tenant `Microsoft.Resources/deployments/*`, management-group create/move operations, subscription association permissions at old/new parents, policy writes, and every nested resource operation. If you enable **Configure Hierarchy Settings**, add `Microsoft.Management/managementGroups/settings/write` on the tenant root group; Owner at `/` already includes it. ELZ does not automatically grant permanent Owner or invent a custom deployment role.
 
 [Tenant Bicep permissions](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-to-tenant#required-access) · [Elevate Azure resource access](https://learn.microsoft.com/azure/role-based-access-control/elevate-access-global-admin) · [Move subscription requirements](https://learn.microsoft.com/azure/governance/management-groups/manage#move-subscriptions).
 
@@ -48,7 +48,16 @@ foreach ($subscriptionId in $subscriptionIds) {
 }
 ```
 
-Confirm Microsoft.Authorization, Microsoft.Resources, and Microsoft.Management operations are available in the target environment. The read-only preflight checks subscription state, network registration, region names, selected group IDs, and enabled initiative availability. Provider registration can take several minutes. [Resource providers](https://learn.microsoft.com/azure/azure-resource-manager/management/resource-providers-and-types).
+If you enable **Enable Activity Log Collection**, also register `Microsoft.Insights` in every supplied subscription and `Microsoft.OperationalInsights` in the management subscription (the platform subscription when management is shared):
+
+```powershell
+foreach ($subscriptionId in $subscriptionIds) {
+    az provider register --namespace Microsoft.Insights --subscription $subscriptionId --wait
+}
+az provider register --namespace Microsoft.OperationalInsights --subscription '<management-or-platform-subscription-guid>' --wait
+```
+
+Confirm Microsoft.Authorization, Microsoft.Resources, and Microsoft.Management operations are available in the target environment. The read-only preflight checks subscription state, provider registration for the selected options, region names, selected group IDs, and enabled initiative availability. Provider registration can take several minutes. [Resource providers](https://learn.microsoft.com/azure/azure-resource-manager/management/resource-providers-and-types).
 
 ## 4. Security groups and directory permissions
 

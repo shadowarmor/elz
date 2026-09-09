@@ -31,7 +31,7 @@ DoNotEnforce alone does not prohibit an administrator from later creating a manu
 | Resource group tags | Intermediate root | Audit missing or empty Owner, CostCenter, Environment |
 | Restrict public IPs and prefixes | Corp | Deny public IP address and public IP prefix resources |
 
-`guardrailEffect=Audit` makes the first, second, and fourth rules audit. It does not change compliance assignment enforcement. The Corp public-IP rule does **not** cover public PaaS endpoints, DNS exposure, or all managed-service ingress. Add service-specific controls as workloads are designed. The location rule evaluates regional Indexed resources; it does not enforce RG metadata residency or constrain every global/extension resource.
+Custom definitions and assignments are named `<prefix>-...` (for example `elz-no-classic`), so two scaffolds with different prefixes in one tenant do not collide. `guardrailEffect=Audit` makes the first, second, and fourth rules audit. It does not change compliance assignment enforcement. The Corp public-IP rule does **not** cover public PaaS endpoints, DNS exposure, or all managed-service ingress. Add service-specific controls as workloads are designed. The location rule evaluates regional Indexed resources; it does not enforce RG metadata residency or constrain every global/extension resource.
 
 Governance is deployed after initial platform/application resources. This avoids policy propagation races during bootstrap; input checks ensure selected resource location agrees with the optional location allowlist. Azure's inherited policy state is eventually consistent. Existing upstream policies still apply during deployment.
 
@@ -39,7 +39,7 @@ Governance is deployed after initial platform/application resources. This avoids
 
 Azure Policy initiative assignments cover a subset of technical controls. They do not certify the organization or establish compliance with legislation. NIS2 obligations depend on applicable national law, organizational scope, governance, and evidence beyond Azure resources. CIS also includes identity, host, and operational configuration this scaffold does not implement.
 
-Examples of work outside this scaffold: MFA and break-glass procedures, Conditional Access/PIM licensing and configuration, vulnerability management, guest configuration, logging and retention, backup and restore exercises, incident reporting, supply-chain controls, staff training, and manual control attestations.
+Examples of work outside this scaffold: MFA and break-glass procedures, Conditional Access/PIM licensing and configuration, vulnerability management, guest configuration, resource-level logging and retention, backup and restore exercises, incident reporting, supply-chain controls, staff training, and manual control attestations. The optional **Enable Activity Log Collection** switch covers the subscription activity-log export that the CIS and benchmark logging controls look for; it is off by default and does not collect resource logs.
 
 Use **Azure Policy → Compliance**, scoped to the intermediate root, to inspect results. Initial evaluation is asynchronous and might take hours; empty subscriptions do not produce meaningful pass scores. Some built-ins depend on Defender, extensions, or resources that are intentionally absent. Regulatory-compliance dashboards and advanced Defender features may require paid plans; ELZ does not enable those plans. [Regulatory compliance in Azure Policy](https://learn.microsoft.com/azure/governance/policy/concepts/regulatory-compliance).
 

@@ -1,9 +1,12 @@
 targetScope = 'managementGroup'
+@description('Organization prefix used in policy resource names. Assignment names at management group scope are limited to 24 characters.')
+@maxLength(12)
+param prefix string
 @description('Audit or deny creation of public IP resources in corporate subscriptions.')
 @allowed(['Audit', 'Deny'])
 param effect string = 'Deny'
 resource definition 'Microsoft.Authorization/policyDefinitions@2025-03-01' = {
-  name: 'elz-corp-no-public-ip'
+  name: '${prefix}-corp-no-public-ip'
   properties: {
     displayName: 'ELZ Corp - Restrict public IP resources'
     description: 'Corp networks use centrally managed connectivity. This does not cover public endpoints on PaaS services.'
@@ -18,7 +21,7 @@ resource definition 'Microsoft.Authorization/policyDefinitions@2025-03-01' = {
   }
 }
 resource assignment 'Microsoft.Authorization/policyAssignments@2025-03-01' = {
-  name: 'elz-corp-no-public-ip'
+  name: '${prefix}-corp-no-pip'
   properties: {
     displayName: 'ELZ Corp - Restrict public IP resources'
     policyDefinitionId: definition.id

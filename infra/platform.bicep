@@ -16,6 +16,8 @@ param securitySubscriptionId string
 param hubAddressPrefix string
 @description('Common ownership and cost tags.')
 param tags object
+@description('Create the management Log Analytics workspace for activity-log collection.')
+param deployLogAnalytics bool = false
 
 module connectivity './modules/subscription-scaffold.bicep' = {
   name: '${prefix}-connectivity'
@@ -29,6 +31,7 @@ module connectivity './modules/subscription-scaffold.bicep' = {
     addressPrefix: hubAddressPrefix
   }
 }
+// Index 0 is management; its scaffold optionally hosts the workspace.
 var serviceSubscriptions = [
   { purpose: 'management', subscriptionId: managementSubscriptionId }
   { purpose: 'identity', subscriptionId: identitySubscriptionId }
@@ -42,6 +45,8 @@ module services './modules/subscription-scaffold.bicep' = [for item in serviceSu
     purpose: item.purpose
     location: location
     tags: tags
+    deployLogAnalytics: deployLogAnalytics && item.purpose == 'management'
   }
 }]
 output hubVirtualNetworkId string = connectivity.outputs.virtualNetworkId
+output logAnalyticsWorkspaceId string = services[0].outputs.logAnalyticsWorkspaceId
