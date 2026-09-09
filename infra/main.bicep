@@ -100,6 +100,9 @@ var placements = concat(platformPlacements, [
 ], empty(nonproductionSubscriptionId) ? [] : [{ subscriptionId: nonproductionSubscriptionId, managementGroupName: '${prefix}-${applicationArchetype}' }])
 
 var subscriptionIds = map(placements, item => toLower(item.subscriptionId))
+// ARM validates dependency IDs before omitting condition=false deployments.
+// Keep the disabled module's scope valid; its condition still prevents any nonproduction resources.
+var nonproductionDeploymentSubscriptionId = empty(nonproductionSubscriptionId) ? applicationSubscriptionId : nonproductionSubscriptionId
 var cidrs = concat([hubAddressPrefix, applicationAddressPrefix], empty(nonproductionSubscriptionId) ? [] : [nonproductionAddressPrefix])
 var parsedNetworks = map(cidrs, cidr => parseCidr(cidr))
 // Convert IPv4 endpoints to integers for overlap checks. Invalid CIDRs/IPv6 fail evaluation before hierarchy creation.
@@ -169,7 +172,7 @@ module application './application.bicep' = {
 
 module nonproduction './application.bicep' = if (!empty(nonproductionSubscriptionId)) {
   name: '${prefix}-application-nonprod'
-  scope: subscription(nonproductionSubscriptionId)
+  scope: subscription(nonproductionDeploymentSubscriptionId)
   params: {
     prefix: prefix
     location: location

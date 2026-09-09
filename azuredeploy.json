@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "11114742418297393133"
+      "templateHash": "16589884576235863369"
     }
   },
   "parameters": {
@@ -199,6 +199,7 @@
     "platformPlacements": "[concat(createArray(createObject('subscriptionId', parameters('platformSubscriptionId'), 'managementGroupName', format('{0}-{1}', variables('prefix'), if(variables('sharedPlatform'), 'platform', 'connectivity')))), if(empty(parameters('managementSubscriptionId')), createArray(), createArray(createObject('subscriptionId', parameters('managementSubscriptionId'), 'managementGroupName', format('{0}-management', variables('prefix'))))), if(empty(parameters('identitySubscriptionId')), createArray(), createArray(createObject('subscriptionId', parameters('identitySubscriptionId'), 'managementGroupName', format('{0}-identity', variables('prefix'))))), if(empty(parameters('securitySubscriptionId')), createArray(), createArray(createObject('subscriptionId', parameters('securitySubscriptionId'), 'managementGroupName', format('{0}-security', variables('prefix'))))))]",
     "placements": "[concat(variables('platformPlacements'), createArray(createObject('subscriptionId', parameters('applicationSubscriptionId'), 'managementGroupName', format('{0}-{1}', variables('prefix'), parameters('applicationArchetype')))), if(empty(parameters('nonproductionSubscriptionId')), createArray(), createArray(createObject('subscriptionId', parameters('nonproductionSubscriptionId'), 'managementGroupName', format('{0}-{1}', variables('prefix'), parameters('applicationArchetype'))))))]",
     "subscriptionIds": "[map(variables('placements'), lambda('item', toLower(lambdaVariables('item').subscriptionId)))]",
+    "nonproductionDeploymentSubscriptionId": "[if(empty(parameters('nonproductionSubscriptionId')), parameters('applicationSubscriptionId'), parameters('nonproductionSubscriptionId'))]",
     "cidrs": "[concat(createArray(parameters('hubAddressPrefix'), parameters('applicationAddressPrefix')), if(empty(parameters('nonproductionSubscriptionId')), createArray(), createArray(parameters('nonproductionAddressPrefix'))))]",
     "parsedNetworks": "[map(variables('cidrs'), lambda('cidr', parseCidr(lambdaVariables('cidr'))))]",
     "numericNetworks": "[map(variables('parsedNetworks'), lambda('net', createObject('start', add(add(add(mul(int(split(lambdaVariables('net').network, '.')[0]), 16777216), mul(int(split(lambdaVariables('net').network, '.')[1]), 65536)), mul(int(split(lambdaVariables('net').network, '.')[2]), 256)), int(split(lambdaVariables('net').network, '.')[3])), 'end', add(add(add(mul(int(split(lambdaVariables('net').broadcast, '.')[0]), 16777216), mul(int(split(lambdaVariables('net').broadcast, '.')[1]), 65536)), mul(int(split(lambdaVariables('net').broadcast, '.')[2]), 256)), int(split(lambdaVariables('net').broadcast, '.')[3])))))]"
@@ -1570,7 +1571,7 @@
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('{0}-application-nonprod', variables('prefix'))]",
-      "subscriptionId": "[parameters('nonproductionSubscriptionId')]",
+      "subscriptionId": "[variables('nonproductionDeploymentSubscriptionId')]",
       "location": "[deployment().location]",
       "properties": {
         "expressionEvaluationOptions": {
@@ -2378,7 +2379,7 @@
       },
       "dependsOn": [
         "[subscriptionResourceId(parameters('applicationSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-prod', variables('prefix')))]",
-        "[subscriptionResourceId(parameters('nonproductionSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-nonprod', variables('prefix')))]",
+        "[subscriptionResourceId(variables('nonproductionDeploymentSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-nonprod', variables('prefix')))]",
         "[tenantResourceId('Microsoft.Resources/deployments', format('{0}-platform', variables('prefix')))]"
       ]
     },
@@ -2575,7 +2576,7 @@
     },
     "nonproductionVirtualNetworkId": {
       "type": "string",
-      "value": "[if(not(empty(parameters('nonproductionSubscriptionId'))), reference(subscriptionResourceId(parameters('nonproductionSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-nonprod', variables('prefix'))), '2025-04-01').outputs.virtualNetworkId.value, '')]"
+      "value": "[if(not(empty(parameters('nonproductionSubscriptionId'))), reference(subscriptionResourceId(variables('nonproductionDeploymentSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-nonprod', variables('prefix'))), '2025-04-01').outputs.virtualNetworkId.value, '')]"
     },
     "complianceAssignmentIds": {
       "type": "array",

@@ -46,6 +46,7 @@ Deferred features may incur charges: network peering/data transfer, NAT/VPN/Expr
 | Subscription placement denied | Same tenant, enabled subscription, write/move permissions on source and destination parents; no upstream restrictions |
 | Validation parameter is not an allowed value | Duplicate explicit subscription IDs, invalid prefix, excluded location, or overlapping/invalid network ranges; correct inputs |
 | Invalid subscription ID | Replace example placeholders; use GUIDs, not names; optional shared platform IDs stay blank |
+| InvalidTemplate reports subscription identifier `''` with nonproduction blank | Reopen the latest README deployment button. Earlier templates used the blank optional ID in a dependency even when that deployment was disabled. The corrected template keeps its scope valid without creating nonproduction resources. |
 | MissingSubscriptionRegistration | Register Microsoft.Network in the supplied subscription and wait |
 | Management group not found immediately after creation | Check nested deployment dependencies and propagation; retry unchanged deployment after Azure catches up |
 | Initiative not found / DefinitionVersion error | Run online preflight against the intended public-cloud tenant; verify catalog and available major version; do not substitute a guessed ID |

@@ -76,6 +76,21 @@ class ScaffoldTests(unittest.TestCase):
         placement = next(r for r in root if r.get('copy', {}).get('name') == 'placement')
         self.assertTrue(any('hierarchy' in d for d in placement['dependsOn']))
 
+    def test_disabled_nonproduction_has_valid_scope_and_dependency_ids(self):
+        # ARM validates dependency resource IDs even when the target deployment's condition is false.
+        root = self.template['resources']
+        nonproduction = next(r for r in root if "{0}-application-nonprod'" in r['name'])
+        self.assertEqual(nonproduction['condition'], "[not(empty(parameters('nonproductionSubscriptionId')))]")
+        self.assertEqual(nonproduction['subscriptionId'], "[variables('nonproductionDeploymentSubscriptionId')]")
+        self.assertEqual(
+            self.template['variables']['nonproductionDeploymentSubscriptionId'],
+            "[if(empty(parameters('nonproductionSubscriptionId')), parameters('applicationSubscriptionId'), parameters('nonproductionSubscriptionId'))]",
+        )
+        governance = next(r for r in root if "{0}-governance'" in r['name'])
+        dependency = next(d for d in governance['dependsOn'] if 'application-nonprod' in d)
+        self.assertIn("subscriptionResourceId(variables('nonproductionDeploymentSubscriptionId')", dependency)
+        self.assertNotIn("subscriptionResourceId(parameters('nonproductionSubscriptionId')", json.dumps(self.template))
+
 
 class InputTests(unittest.TestCase):
     def setUp(self):
