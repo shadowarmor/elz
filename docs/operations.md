@@ -15,7 +15,9 @@ For a controlled acceptance test in the target greenfield tenant, use a disposab
 
 Edit Bicep, run `./scripts/build.ps1`, and commit **both** source and generated JSON. CI uses Bicep **0.47.16** and fails if portal artifacts differ from their source. Upgrade compiler and templates together. Use a stable organization prefix and deployment location; changing names can create a second hierarchy. Resource-group location and named tenant deployment location cannot be changed in place.
 
-For predictable portal deployment, replace `main` in the raw template URL with a reviewed full Git commit SHA and URL-encode it. The compiled templates are self-contained, so a commit URL pins their complete module content. Initiative assignments still ingest minor and patch updates within their pinned major versions.
+The README buttons use `https://cdn.jsdelivr.net/gh/shadowarmor/elz@<full-commit-sha>/<template>.json`. They are pinned to a reviewed template commit, rather than a mutable branch. After publishing a template change, update both button URLs to that new full commit SHA in a follow-up documentation commit. Verify each endpoint returns HTTP 200, `Access-Control-Allow-Origin: *`, and JSON matching the committed template before publishing the new links. URL-encode the complete CDN URL after `https://portal.azure.com/#create/Microsoft.Template/uri/`.
+
+The compiled templates are self-contained, so a commit URL pins their complete module content. Initiative assignments still ingest minor and patch updates within their pinned major versions. jsDelivr serves the public GitHub files without Azure or GitHub credentials; it hosts no tenant parameters. CLI deployments use local files and do not depend on this CDN.
 
 ARM deployments use incremental mode. Setting an optional subscription/group/policy parameter to blank or false **does not remove** previously deployed resources, role assignments, policies, or subscription placement. Changing group IDs may leave the old role assignment. Changing application archetype or filling dedicated platform IDs can move subscriptions and change inheritance, and the old platform resource groups remain. Review what-if plus explicit retirement actions; never treat parameter removal as a rollback.
 
@@ -47,7 +49,7 @@ Deferred features may incur charges: network peering/data transfer, NAT/VPN/Expr
 | MissingSubscriptionRegistration | Register Microsoft.Network in the supplied subscription and wait |
 | Management group not found immediately after creation | Check nested deployment dependencies and propagation; retry unchanged deployment after Azure catches up |
 | Initiative not found / DefinitionVersion error | Run online preflight against the intended public-cloud tenant; verify catalog and available major version; do not substitute a guessed ID |
-| Portal cannot download template | Confirm public repository/raw URL is reachable; retry transient GitHub CDN errors; clone and use CLI as fallback |
+| Portal cannot download template | Reopen the updated README button, which uses a commit-pinned jsDelivr URL. The original GitHub raw endpoint was observed returning HTTP 503 despite having CORS enabled. If the CDN URL also fails, clone and use the CLI or paste the downloaded JSON into the portal template editor. |
 | Deployment location immutable | Keep the original metadata location or choose a new deployment name |
 | Workload networking fails | Scaffold denies traffic by design; add approved NSG rules, DNS, routes, and connectivity |
 | No immediate compliance results | Evaluation is asynchronous; verify assignment scope and wait, then inspect policy state |
