@@ -10,8 +10,13 @@ preflight = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(preflight)
 
 
+def direct_resources(template):
+    declared = template.get('resources', [])
+    return list(declared.values()) if isinstance(declared, dict) else declared
+
+
 def resources(template):
-    for resource in template.get('resources', []):
+    for resource in direct_resources(template):
         yield resource
         nested = resource.get('properties', {}).get('template')
         if nested:
@@ -34,7 +39,7 @@ class ScaffoldTests(unittest.TestCase):
                    'Microsoft.Management/managementGroups/subscriptions', 'Microsoft.Resources/resourceGroups',
                    'Microsoft.Network/virtualNetworks', 'Microsoft.Network/networkSecurityGroups',
                    'Microsoft.Authorization/policyDefinitions', 'Microsoft.Authorization/policyAssignments',
-                   'Microsoft.Authorization/roleAssignments'}
+                   'Microsoft.Authorization/roleAssignments', 'Microsoft.Graph/groups@v1.0'}
         self.assertTrue(self.resources)
         self.assertEqual({r['type'] for r in self.resources} - allowed, set())
 
@@ -67,10 +72,10 @@ class ScaffoldTests(unittest.TestCase):
             self.assertLessEqual(len(entry['assignmentName']), 24)
 
     def test_validation_precedes_hierarchy_and_placement(self):
-        root = self.template['resources']
+        root = direct_resources(self.template)
         validation = next(r for r in root if 'validate-inputs' in r['name'])
         hierarchy = next(r for r in root if "{0}-hierarchy'" in r['name'])
-        self.assertTrue(any('validate-inputs' in d for d in hierarchy['dependsOn']))
+        self.assertTrue(any('validate-inputs' in d or d == 'inputValidation' for d in hierarchy['dependsOn']))
         for p in validation['properties']['template']['parameters'].values():
             self.assertEqual(p['allowedValues'], [True])
         placement = next(r for r in root if r.get('copy', {}).get('name') == 'placement')
@@ -78,7 +83,7 @@ class ScaffoldTests(unittest.TestCase):
 
     def test_disabled_nonproduction_has_valid_scope_and_dependency_ids(self):
         # ARM validates dependency resource IDs even when the target deployment's condition is false.
-        root = self.template['resources']
+        root = direct_resources(self.template)
         nonproduction = next(r for r in root if "{0}-application-nonprod'" in r['name'])
         self.assertEqual(nonproduction['condition'], "[not(empty(parameters('nonproductionSubscriptionId')))]")
         self.assertEqual(nonproduction['subscriptionId'], "[variables('nonproductionDeploymentSubscriptionId')]")
@@ -87,9 +92,44 @@ class ScaffoldTests(unittest.TestCase):
             "[if(empty(parameters('nonproductionSubscriptionId')), parameters('applicationSubscriptionId'), parameters('nonproductionSubscriptionId'))]",
         )
         governance = next(r for r in root if "{0}-governance'" in r['name'])
-        dependency = next(d for d in governance['dependsOn'] if 'application-nonprod' in d)
-        self.assertIn("subscriptionResourceId(variables('nonproductionDeploymentSubscriptionId')", dependency)
+        dependency = next(d for d in governance['dependsOn'] if 'application-nonprod' in d or d == 'nonproduction')
+        if dependency != 'nonproduction':
+            self.assertIn("subscriptionResourceId(variables('nonproductionDeploymentSubscriptionId')", dependency)
         self.assertNotIn("subscriptionResourceId(parameters('nonproductionSubscriptionId')", json.dumps(self.template))
+
+    def test_graph_auth_import_is_present_in_each_entry_point(self):
+        for filename in ('azuredeploy.json', 'application.azuredeploy.json'):
+            with self.subTest(filename=filename):
+                template = json.loads((ROOT / filename).read_text(encoding='utf-8-sig'))
+                self.assertEqual(template['imports']['microsoftGraphV1'], {'provider': 'MicrosoftGraph', 'version': '1.0.0'})
+                self.assertIs(template['parameters']['createSecurityGroups']['defaultValue'], True)
+
+    def test_security_groups_are_static_nonmail_and_preserve_members(self):
+        groups = [r for r in self.resources if r['type'] == 'Microsoft.Graph/groups@v1.0']
+        self.assertTrue(groups)
+        for group in groups:
+            props = group['properties']
+            self.assertIs(props['securityEnabled'], True)
+            self.assertIs(props['mailEnabled'], False)
+            self.assertNotIn('isAssignableToRole', props)
+            self.assertNotIn('membershipRule', props)
+            self.assertIn('uniqueName', props)
+            self.assertEqual(props['owners']['relationshipSemantics'], 'append')
+            self.assertEqual(props['members']['relationshipSemantics'], 'append')
+            self.assertIn('empty(parameters(', group['condition'])  # Never modify groups supplied by ID.
+
+    def test_groups_wire_to_separate_production_and_nonproduction_roles(self):
+        root = self.template['resources']
+        group_defs = self.template['variables']['groupDefinitions']
+        self.assertEqual([g['key'] for g in group_defs], ['platformAdmins', 'securityReaders', 'applicationProd', 'applicationNonprod'])
+        self.assertIs(group_defs[2]['enabled'], True)
+        self.assertIn("nonproductionSubscriptionId", group_defs[3]['enabled'])
+        for module, parameter, index in [('application', 'applicationTeamGroupObjectId', 2), ('nonproduction', 'applicationTeamGroupObjectId', 3), ('governance', 'securityReadersGroupObjectId', 1), ('platformRbac', 'principalId', 0)]:
+            value = root[module]['properties']['parameters'][parameter]['value']
+            self.assertIn(f"format('securityGroups[{{0}}]', {index})", value)
+        self.assertFalse(root['application']['properties']['parameters']['createSecurityGroups']['value'])
+        self.assertFalse(root['nonproduction']['properties']['parameters']['createSecurityGroups']['value'])
+        self.assertEqual(set(self.template['outputs']['securityGroupObjectIds']['value']), {'platformAdmins', 'securityReaders', 'applicationProd', 'applicationNonprod'})
 
 
 class InputTests(unittest.TestCase):
@@ -130,6 +170,21 @@ class InputTests(unittest.TestCase):
         self.values['allowedLocations'] = ['eastus']
         self.values['organizationPrefix'] = '../outside'
         self.assertEqual(len(preflight.validate(self.values)), 2)
+
+    def test_security_group_member_inputs(self):
+        self.values['securityGroupOwnerObjectIds'] = ['33333333-3333-4333-8333-333333333333']
+        self.values['securityGroupMembers'] = {'applicationProd': ['44444444-4444-4444-8444-444444444444']}
+        self.assertEqual(preflight.validate(self.values), [])
+        self.values['securityGroupMembers']['applicationProd'] = ['/subscriptions/not-an-object-id']
+        self.assertTrue(any('applicationProd' in error for error in preflight.validate(self.values)))
+
+    def test_security_group_inputs_reject_unknown_keys_and_wrong_types(self):
+        self.values['securityGroupMembers'] = {'platfromAdmins': []}
+        self.assertTrue(any('Unknown' in error for error in preflight.validate(self.values)))
+        self.values['securityGroupMembers'] = {'platformAdmins': 'not-an-array'}
+        self.assertTrue(any('array' in error for error in preflight.validate(self.values)))
+        self.values['securityGroupOwnerObjectIds'] = ['not-a-guid']
+        self.assertTrue(any('securityGroupOwnerObjectIds' in error for error in preflight.validate(self.values)))
 
 
 if __name__ == '__main__':

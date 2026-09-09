@@ -1,11 +1,12 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-08-01/tenantDeploymentTemplate.json#",
+  "languageVersion": "2.0",
   "contentVersion": "1.0.0.0",
   "metadata": {
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "16589884576235863369"
+      "templateHash": "10260829488118776234"
     }
   },
   "parameters": {
@@ -165,25 +166,57 @@
         "description": "Assign the NIS2 built-in initiative. Assignment is evidence gathering, not certification or legal compliance."
       }
     },
+    "createSecurityGroups": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Create missing Entra security groups and assign their Azure RBAC roles. Requires Entra group-write privileges in addition to Azure Owner."
+      }
+    },
+    "securityGroupOwnerObjectIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "defaultValue": [],
+      "maxLength": 100,
+      "metadata": {
+        "description": "Owner object IDs to append to groups created by ELZ. Existing groups supplied by ID are not modified. Owners can manage membership and therefore access."
+      }
+    },
+    "securityGroupMembers": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Optional member object-ID arrays keyed by platformAdmins, securityReaders, applicationProd, applicationNonprod. Members are appended; omitted/empty lists preserve existing membership. Existing groups supplied by ID are not modified."
+      }
+    },
     "platformAdminsGroupObjectId": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional Entra GROUP object ID receiving Contributor at Platform. No tenant roles or groups are created."
+        "description": "Optional existing Entra security GROUP object ID receiving Contributor at Platform. Blank creates sg-<prefix>-platform-admins when createSecurityGroups is true."
       }
     },
     "securityReadersGroupObjectId": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional Entra GROUP object ID receiving Reader and Security Reader at the intermediate root."
+        "description": "Optional existing Entra security GROUP object ID receiving Reader and Security Reader at the intermediate root. Blank creates sg-<prefix>-security-readers."
       }
     },
     "applicationTeamGroupObjectId": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional Entra GROUP object ID receiving Contributor on application workload resource groups only."
+        "description": "Optional existing Entra security GROUP object ID receiving Contributor on the production workload resource group. Blank creates sg-<prefix>-application-prod-contributors."
+      }
+    },
+    "nonproductionApplicationTeamGroupObjectId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional existing Entra security GROUP object ID for the nonproduction workload resource group. Blank creates a separate nonproduction group when that landing zone is enabled."
       }
     }
   },
@@ -202,10 +235,46 @@
     "nonproductionDeploymentSubscriptionId": "[if(empty(parameters('nonproductionSubscriptionId')), parameters('applicationSubscriptionId'), parameters('nonproductionSubscriptionId'))]",
     "cidrs": "[concat(createArray(parameters('hubAddressPrefix'), parameters('applicationAddressPrefix')), if(empty(parameters('nonproductionSubscriptionId')), createArray(), createArray(parameters('nonproductionAddressPrefix'))))]",
     "parsedNetworks": "[map(variables('cidrs'), lambda('cidr', parseCidr(lambdaVariables('cidr'))))]",
-    "numericNetworks": "[map(variables('parsedNetworks'), lambda('net', createObject('start', add(add(add(mul(int(split(lambdaVariables('net').network, '.')[0]), 16777216), mul(int(split(lambdaVariables('net').network, '.')[1]), 65536)), mul(int(split(lambdaVariables('net').network, '.')[2]), 256)), int(split(lambdaVariables('net').network, '.')[3])), 'end', add(add(add(mul(int(split(lambdaVariables('net').broadcast, '.')[0]), 16777216), mul(int(split(lambdaVariables('net').broadcast, '.')[1]), 65536)), mul(int(split(lambdaVariables('net').broadcast, '.')[2]), 256)), int(split(lambdaVariables('net').broadcast, '.')[3])))))]"
+    "numericNetworks": "[map(variables('parsedNetworks'), lambda('net', createObject('start', add(add(add(mul(int(split(lambdaVariables('net').network, '.')[0]), 16777216), mul(int(split(lambdaVariables('net').network, '.')[1]), 65536)), mul(int(split(lambdaVariables('net').network, '.')[2]), 256)), int(split(lambdaVariables('net').network, '.')[3])), 'end', add(add(add(mul(int(split(lambdaVariables('net').broadcast, '.')[0]), 16777216), mul(int(split(lambdaVariables('net').broadcast, '.')[1]), 65536)), mul(int(split(lambdaVariables('net').broadcast, '.')[2]), 256)), int(split(lambdaVariables('net').broadcast, '.')[3])))))]",
+    "groupDefinitions": [
+      {
+        "key": "platformAdmins",
+        "purpose": "platform-admins",
+        "existingId": "[parameters('platformAdminsGroupObjectId')]",
+        "enabled": true,
+        "description": "ELZ platform administrators: Azure Contributor on the Platform management group."
+      },
+      {
+        "key": "securityReaders",
+        "purpose": "security-readers",
+        "existingId": "[parameters('securityReadersGroupObjectId')]",
+        "enabled": true,
+        "description": "ELZ security readers: Azure Reader and Security Reader on the organization management group."
+      },
+      {
+        "key": "applicationProd",
+        "purpose": "application-prod-contributors",
+        "existingId": "[parameters('applicationTeamGroupObjectId')]",
+        "enabled": true,
+        "description": "ELZ production application contributors: Azure Contributor on the production workload resource group only."
+      },
+      {
+        "key": "applicationNonprod",
+        "purpose": "application-nonprod-contributors",
+        "existingId": "[parameters('nonproductionApplicationTeamGroupObjectId')]",
+        "enabled": "[not(empty(parameters('nonproductionSubscriptionId')))]",
+        "description": "ELZ nonproduction application contributors: Azure Contributor on the nonproduction workload resource group only."
+      }
+    ]
   },
-  "resources": [
-    {
+  "imports": {
+    "microsoftGraphV1": {
+      "provider": "MicrosoftGraph",
+      "version": "1.0.0"
+    }
+  },
+  "resources": {
+    "inputValidation": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('{0}-validate-inputs', variables('prefix'))]",
@@ -311,7 +380,7 @@
         }
       }
     },
-    {
+    "hierarchy": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('{0}-hierarchy', variables('prefix'))]",
@@ -468,10 +537,165 @@
         }
       },
       "dependsOn": [
-        "[tenantResourceId('Microsoft.Resources/deployments', format('{0}-validate-inputs', variables('prefix')))]"
+        "inputValidation"
       ]
     },
-    {
+    "securityGroups": {
+      "copy": {
+        "name": "securityGroups",
+        "count": "[length(variables('groupDefinitions'))]"
+      },
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-security-group-{1}', variables('prefix'), copyIndex())]",
+      "location": "[deployment().location]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "prefix": {
+            "value": "[variables('prefix')]"
+          },
+          "purpose": {
+            "value": "[variables('groupDefinitions')[copyIndex()].purpose]"
+          },
+          "groupDescription": {
+            "value": "[variables('groupDefinitions')[copyIndex()].description]"
+          },
+          "createGroup": {
+            "value": "[and(parameters('createSecurityGroups'), variables('groupDefinitions')[copyIndex()].enabled)]"
+          },
+          "existingGroupObjectId": {
+            "value": "[variables('groupDefinitions')[copyIndex()].existingId]"
+          },
+          "ownerObjectIds": {
+            "value": "[parameters('securityGroupOwnerObjectIds')]"
+          },
+          "memberObjectIds": {
+            "value": "[coalesce(tryGet(parameters('securityGroupMembers'), variables('groupDefinitions')[copyIndex()].key), createArray())]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-08-01/tenantDeploymentTemplate.json#",
+          "languageVersion": "2.0",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "12591814231634386208"
+            }
+          },
+          "parameters": {
+            "prefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Stable lowercase organization prefix."
+              }
+            },
+            "purpose": {
+              "type": "string",
+              "metadata": {
+                "description": "Group purpose suffix used in its immutable uniqueName and display name."
+              }
+            },
+            "groupDescription": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure access granted to this group by the parent deployment."
+              }
+            },
+            "createGroup": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Create the group when no existing object ID is supplied."
+              }
+            },
+            "existingGroupObjectId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Existing Entra security group object ID. When supplied, group properties and membership are not modified."
+              }
+            },
+            "ownerObjectIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "defaultValue": [],
+              "maxLength": 100,
+              "metadata": {
+                "description": "Explicit owner object IDs to append to newly managed groups. Empty leaves ownership to the tenant group administration process."
+              }
+            },
+            "memberObjectIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "defaultValue": [],
+              "metadata": {
+                "description": "Explicit member object IDs to append. Empty grants no individual access; existing members are preserved."
+              }
+            }
+          },
+          "variables": {
+            "groupName": "[format('sg-{0}-{1}', parameters('prefix'), parameters('purpose'))]"
+          },
+          "imports": {
+            "microsoftGraphV1": {
+              "provider": "MicrosoftGraph",
+              "version": "1.0.0"
+            }
+          },
+          "resources": {
+            "securityGroup": {
+              "condition": "[and(parameters('createGroup'), empty(parameters('existingGroupObjectId')))]",
+              "import": "microsoftGraphV1",
+              "type": "Microsoft.Graph/groups@v1.0",
+              "properties": {
+                "uniqueName": "[variables('groupName')]",
+                "displayName": "[variables('groupName')]",
+                "description": "[parameters('groupDescription')]",
+                "mailEnabled": false,
+                "mailNickname": "[variables('groupName')]",
+                "securityEnabled": true,
+                "owners": {
+                  "relationshipSemantics": "append",
+                  "relationships": "[parameters('ownerObjectIds')]"
+                },
+                "members": {
+                  "relationshipSemantics": "append",
+                  "relationships": "[parameters('memberObjectIds')]"
+                }
+              }
+            }
+          },
+          "outputs": {
+            "groupObjectId": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('existingGroupObjectId'))), parameters('existingGroupObjectId'), if(parameters('createGroup'), reference('securityGroup').id, ''))]"
+            },
+            "displayName": {
+              "type": "string",
+              "value": "[variables('groupName')]"
+            },
+            "managedByTemplate": {
+              "type": "bool",
+              "value": "[and(parameters('createGroup'), empty(parameters('existingGroupObjectId')))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "inputValidation"
+      ]
+    },
+    "placement": {
       "copy": {
         "name": "placement",
         "count": "[length(variables('placements'))]"
@@ -527,10 +751,10 @@
         }
       },
       "dependsOn": [
-        "[tenantResourceId('Microsoft.Resources/deployments', format('{0}-hierarchy', variables('prefix')))]"
+        "hierarchy"
       ]
     },
-    {
+    "platform": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('{0}-platform', variables('prefix'))]",
@@ -1206,7 +1430,7 @@
         "placement"
       ]
     },
-    {
+    "application": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('{0}-application-prod', variables('prefix'))]",
@@ -1234,17 +1458,21 @@
             "value": "[variables('tags')]"
           },
           "applicationTeamGroupObjectId": {
-            "value": "[parameters('applicationTeamGroupObjectId')]"
+            "value": "[reference(format('securityGroups[{0}]', 2)).outputs.groupObjectId.value]"
+          },
+          "createSecurityGroups": {
+            "value": false
           }
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+          "languageVersion": "2.0",
           "contentVersion": "1.0.0.0",
           "metadata": {
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "5564836185115657250"
+              "templateHash": "14011951200373214106"
             }
           },
           "parameters": {
@@ -1298,29 +1526,85 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Optional Entra group object ID granted Contributor only on the workload resource group."
+                "description": "Optional existing Entra security group object ID granted Contributor only on the workload resource group. Blank creates a group when createSecurityGroups is true."
+              }
+            },
+            "createSecurityGroups": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Create the application security group if no existing group is supplied. Requires Microsoft Graph group-write privileges."
+              }
+            },
+            "securityGroupOwnerObjectIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "defaultValue": [],
+              "maxLength": 100,
+              "metadata": {
+                "description": "Owner object IDs to append to the application group created by this template. Existing groups supplied by ID are not modified."
+              }
+            },
+            "applicationTeamMemberObjectIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "defaultValue": [],
+              "metadata": {
+                "description": "Member object IDs to append to the application group created by this template. Empty preserves existing members and adds none."
               }
             }
           },
           "variables": {
+            "applicationGroupName": "[format('sg-{0}-application-{1}-contributors', parameters('prefix'), parameters('environment'))]",
             "resourceTags": "[union(parameters('tags'), createObject('Environment', parameters('environment'), 'LandingZone', 'application'))]"
           },
-          "resources": [
-            {
+          "imports": {
+            "microsoftGraphV1": {
+              "provider": "MicrosoftGraph",
+              "version": "1.0.0"
+            }
+          },
+          "resources": {
+            "applicationSecurityGroup": {
+              "condition": "[and(parameters('createSecurityGroups'), empty(parameters('applicationTeamGroupObjectId')))]",
+              "import": "microsoftGraphV1",
+              "type": "Microsoft.Graph/groups@v1.0",
+              "properties": {
+                "uniqueName": "[variables('applicationGroupName')]",
+                "displayName": "[variables('applicationGroupName')]",
+                "description": "[format('ELZ {0} application contributors: Azure Contributor on the workload resource group only.', parameters('environment'))]",
+                "mailEnabled": false,
+                "mailNickname": "[variables('applicationGroupName')]",
+                "securityEnabled": true,
+                "owners": {
+                  "relationshipSemantics": "append",
+                  "relationships": "[parameters('securityGroupOwnerObjectIds')]"
+                },
+                "members": {
+                  "relationshipSemantics": "append",
+                  "relationships": "[parameters('applicationTeamMemberObjectIds')]"
+                }
+              }
+            },
+            "networkGroup": {
               "type": "Microsoft.Resources/resourceGroups",
               "apiVersion": "2025-04-01",
               "name": "[format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))]",
               "location": "[parameters('location')]",
               "tags": "[variables('resourceTags')]"
             },
-            {
+            "workloadGroup": {
               "type": "Microsoft.Resources/resourceGroups",
               "apiVersion": "2025-04-01",
               "name": "[format('rg-{0}-{1}-workload', parameters('prefix'), parameters('environment'))]",
               "location": "[parameters('location')]",
               "tags": "[variables('resourceTags')]"
             },
-            {
+            "network": {
               "type": "Microsoft.Resources/deployments",
               "apiVersion": "2025-04-01",
               "name": "[format('{0}-{1}-network', parameters('prefix'), parameters('environment'))]",
@@ -1486,11 +1770,11 @@
                 }
               },
               "dependsOn": [
-                "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment')))]"
+                "networkGroup"
               ]
             },
-            {
-              "condition": "[not(empty(parameters('applicationTeamGroupObjectId')))]",
+            "applicationContributor": {
+              "condition": "[or(parameters('createSecurityGroups'), not(empty(parameters('applicationTeamGroupObjectId'))))]",
               "type": "Microsoft.Resources/deployments",
               "apiVersion": "2025-04-01",
               "name": "[format('{0}-{1}-team', parameters('prefix'), parameters('environment'))]",
@@ -1501,9 +1785,7 @@
                 },
                 "mode": "Incremental",
                 "parameters": {
-                  "principalId": {
-                    "value": "[parameters('applicationTeamGroupObjectId')]"
-                  }
+                  "principalId": "[if(not(empty(parameters('applicationTeamGroupObjectId'))), createObject('value', parameters('applicationTeamGroupObjectId')), if(parameters('createSecurityGroups'), createObject('value', reference('applicationSecurityGroup').id), createObject('value', '')))]"
                 },
                 "template": {
                   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -1538,14 +1820,15 @@
                 }
               },
               "dependsOn": [
-                "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}-workload', parameters('prefix'), parameters('environment')))]"
+                "applicationSecurityGroup",
+                "workloadGroup"
               ]
             }
-          ],
+          },
           "outputs": {
             "virtualNetworkId": {
               "type": "string",
-              "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.virtualNetworkId.value]"
+              "value": "[reference('network').outputs.virtualNetworkId.value]"
             },
             "workloadResourceGroupId": {
               "type": "string",
@@ -1553,20 +1836,25 @@
             },
             "workloadSubnetId": {
               "type": "string",
-              "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.workloadSubnetId.value]"
+              "value": "[reference('network').outputs.workloadSubnetId.value]"
             },
             "privateEndpointSubnetId": {
               "type": "string",
-              "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.privateEndpointSubnetId.value]"
+              "value": "[reference('network').outputs.privateEndpointSubnetId.value]"
+            },
+            "applicationSecurityGroupObjectId": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('applicationTeamGroupObjectId'))), parameters('applicationTeamGroupObjectId'), if(parameters('createSecurityGroups'), reference('applicationSecurityGroup').id, ''))]"
             }
           }
         }
       },
       "dependsOn": [
-        "placement"
+        "placement",
+        "[format('securityGroups[{0}]', 2)]"
       ]
     },
-    {
+    "nonproduction": {
       "condition": "[not(empty(parameters('nonproductionSubscriptionId')))]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
@@ -1595,17 +1883,21 @@
             "value": "[variables('tags')]"
           },
           "applicationTeamGroupObjectId": {
-            "value": "[parameters('applicationTeamGroupObjectId')]"
+            "value": "[reference(format('securityGroups[{0}]', 3)).outputs.groupObjectId.value]"
+          },
+          "createSecurityGroups": {
+            "value": false
           }
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+          "languageVersion": "2.0",
           "contentVersion": "1.0.0.0",
           "metadata": {
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "5564836185115657250"
+              "templateHash": "14011951200373214106"
             }
           },
           "parameters": {
@@ -1659,29 +1951,85 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Optional Entra group object ID granted Contributor only on the workload resource group."
+                "description": "Optional existing Entra security group object ID granted Contributor only on the workload resource group. Blank creates a group when createSecurityGroups is true."
+              }
+            },
+            "createSecurityGroups": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Create the application security group if no existing group is supplied. Requires Microsoft Graph group-write privileges."
+              }
+            },
+            "securityGroupOwnerObjectIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "defaultValue": [],
+              "maxLength": 100,
+              "metadata": {
+                "description": "Owner object IDs to append to the application group created by this template. Existing groups supplied by ID are not modified."
+              }
+            },
+            "applicationTeamMemberObjectIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "defaultValue": [],
+              "metadata": {
+                "description": "Member object IDs to append to the application group created by this template. Empty preserves existing members and adds none."
               }
             }
           },
           "variables": {
+            "applicationGroupName": "[format('sg-{0}-application-{1}-contributors', parameters('prefix'), parameters('environment'))]",
             "resourceTags": "[union(parameters('tags'), createObject('Environment', parameters('environment'), 'LandingZone', 'application'))]"
           },
-          "resources": [
-            {
+          "imports": {
+            "microsoftGraphV1": {
+              "provider": "MicrosoftGraph",
+              "version": "1.0.0"
+            }
+          },
+          "resources": {
+            "applicationSecurityGroup": {
+              "condition": "[and(parameters('createSecurityGroups'), empty(parameters('applicationTeamGroupObjectId')))]",
+              "import": "microsoftGraphV1",
+              "type": "Microsoft.Graph/groups@v1.0",
+              "properties": {
+                "uniqueName": "[variables('applicationGroupName')]",
+                "displayName": "[variables('applicationGroupName')]",
+                "description": "[format('ELZ {0} application contributors: Azure Contributor on the workload resource group only.', parameters('environment'))]",
+                "mailEnabled": false,
+                "mailNickname": "[variables('applicationGroupName')]",
+                "securityEnabled": true,
+                "owners": {
+                  "relationshipSemantics": "append",
+                  "relationships": "[parameters('securityGroupOwnerObjectIds')]"
+                },
+                "members": {
+                  "relationshipSemantics": "append",
+                  "relationships": "[parameters('applicationTeamMemberObjectIds')]"
+                }
+              }
+            },
+            "networkGroup": {
               "type": "Microsoft.Resources/resourceGroups",
               "apiVersion": "2025-04-01",
               "name": "[format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))]",
               "location": "[parameters('location')]",
               "tags": "[variables('resourceTags')]"
             },
-            {
+            "workloadGroup": {
               "type": "Microsoft.Resources/resourceGroups",
               "apiVersion": "2025-04-01",
               "name": "[format('rg-{0}-{1}-workload', parameters('prefix'), parameters('environment'))]",
               "location": "[parameters('location')]",
               "tags": "[variables('resourceTags')]"
             },
-            {
+            "network": {
               "type": "Microsoft.Resources/deployments",
               "apiVersion": "2025-04-01",
               "name": "[format('{0}-{1}-network', parameters('prefix'), parameters('environment'))]",
@@ -1847,11 +2195,11 @@
                 }
               },
               "dependsOn": [
-                "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment')))]"
+                "networkGroup"
               ]
             },
-            {
-              "condition": "[not(empty(parameters('applicationTeamGroupObjectId')))]",
+            "applicationContributor": {
+              "condition": "[or(parameters('createSecurityGroups'), not(empty(parameters('applicationTeamGroupObjectId'))))]",
               "type": "Microsoft.Resources/deployments",
               "apiVersion": "2025-04-01",
               "name": "[format('{0}-{1}-team', parameters('prefix'), parameters('environment'))]",
@@ -1862,9 +2210,7 @@
                 },
                 "mode": "Incremental",
                 "parameters": {
-                  "principalId": {
-                    "value": "[parameters('applicationTeamGroupObjectId')]"
-                  }
+                  "principalId": "[if(not(empty(parameters('applicationTeamGroupObjectId'))), createObject('value', parameters('applicationTeamGroupObjectId')), if(parameters('createSecurityGroups'), createObject('value', reference('applicationSecurityGroup').id), createObject('value', '')))]"
                 },
                 "template": {
                   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -1899,14 +2245,15 @@
                 }
               },
               "dependsOn": [
-                "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('rg-{0}-{1}-workload', parameters('prefix'), parameters('environment')))]"
+                "applicationSecurityGroup",
+                "workloadGroup"
               ]
             }
-          ],
+          },
           "outputs": {
             "virtualNetworkId": {
               "type": "string",
-              "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.virtualNetworkId.value]"
+              "value": "[reference('network').outputs.virtualNetworkId.value]"
             },
             "workloadResourceGroupId": {
               "type": "string",
@@ -1914,20 +2261,25 @@
             },
             "workloadSubnetId": {
               "type": "string",
-              "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.workloadSubnetId.value]"
+              "value": "[reference('network').outputs.workloadSubnetId.value]"
             },
             "privateEndpointSubnetId": {
               "type": "string",
-              "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('rg-{0}-{1}-network', parameters('prefix'), parameters('environment'))), 'Microsoft.Resources/deployments', format('{0}-{1}-network', parameters('prefix'), parameters('environment'))), '2025-04-01').outputs.privateEndpointSubnetId.value]"
+              "value": "[reference('network').outputs.privateEndpointSubnetId.value]"
+            },
+            "applicationSecurityGroupObjectId": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('applicationTeamGroupObjectId'))), parameters('applicationTeamGroupObjectId'), if(parameters('createSecurityGroups'), reference('applicationSecurityGroup').id, ''))]"
             }
           }
         }
       },
       "dependsOn": [
-        "placement"
+        "placement",
+        "[format('securityGroups[{0}]', 3)]"
       ]
     },
-    {
+    "governance": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('{0}-governance', variables('prefix'))]",
@@ -1958,7 +2310,7 @@
             "value": "[parameters('enableNis2')]"
           },
           "securityReadersGroupObjectId": {
-            "value": "[parameters('securityReadersGroupObjectId')]"
+            "value": "[reference(format('securityGroups[{0}]', 1)).outputs.groupObjectId.value]"
           }
         },
         "template": {
@@ -2378,12 +2730,13 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId(parameters('applicationSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-prod', variables('prefix')))]",
-        "[subscriptionResourceId(variables('nonproductionDeploymentSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-nonprod', variables('prefix')))]",
-        "[tenantResourceId('Microsoft.Resources/deployments', format('{0}-platform', variables('prefix')))]"
+        "application",
+        "nonproduction",
+        "platform",
+        "[format('securityGroups[{0}]', 1)]"
       ]
     },
-    {
+    "corpGuardrails": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('{0}-corp-guardrails', variables('prefix'))]",
@@ -2487,11 +2840,11 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(tenantResourceId('Microsoft.Management/managementGroups', variables('prefix')), 'Microsoft.Resources/deployments', format('{0}-governance', variables('prefix')))]"
+        "governance"
       ]
     },
-    {
-      "condition": "[not(empty(parameters('platformAdminsGroupObjectId')))]",
+    "platformRbac": {
+      "condition": "[or(parameters('createSecurityGroups'), not(empty(parameters('platformAdminsGroupObjectId'))))]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('{0}-platform-rbac', variables('prefix'))]",
@@ -2504,7 +2857,7 @@
         "mode": "Incremental",
         "parameters": {
           "principalId": {
-            "value": "[parameters('platformAdminsGroupObjectId')]"
+            "value": "[reference(format('securityGroups[{0}]', 0)).outputs.groupObjectId.value]"
           },
           "roleDefinitionId": {
             "value": "b24988ac-6180-42a0-ab88-20f7382dd24c"
@@ -2549,14 +2902,15 @@
         }
       },
       "dependsOn": [
-        "[tenantResourceId('Microsoft.Resources/deployments', format('{0}-hierarchy', variables('prefix')))]"
+        "hierarchy",
+        "[format('securityGroups[{0}]', 0)]"
       ]
     }
-  ],
+  },
   "outputs": {
     "rootManagementGroupId": {
       "type": "string",
-      "value": "[reference(tenantResourceId('Microsoft.Resources/deployments', format('{0}-hierarchy', variables('prefix'))), '2025-04-01').outputs.rootManagementGroupId.value]"
+      "value": "[reference('hierarchy').outputs.rootManagementGroupId.value]"
     },
     "subscriptionPlacement": {
       "type": "array",
@@ -2564,27 +2918,36 @@
     },
     "platformHubVirtualNetworkId": {
       "type": "string",
-      "value": "[reference(tenantResourceId('Microsoft.Resources/deployments', format('{0}-platform', variables('prefix'))), '2025-04-01').outputs.hubVirtualNetworkId.value]"
+      "value": "[reference('platform').outputs.hubVirtualNetworkId.value]"
     },
     "applicationVirtualNetworkId": {
       "type": "string",
-      "value": "[reference(subscriptionResourceId(parameters('applicationSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-prod', variables('prefix'))), '2025-04-01').outputs.virtualNetworkId.value]"
+      "value": "[reference('application').outputs.virtualNetworkId.value]"
     },
     "applicationWorkloadResourceGroupId": {
       "type": "string",
-      "value": "[reference(subscriptionResourceId(parameters('applicationSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-prod', variables('prefix'))), '2025-04-01').outputs.workloadResourceGroupId.value]"
+      "value": "[reference('application').outputs.workloadResourceGroupId.value]"
     },
     "nonproductionVirtualNetworkId": {
       "type": "string",
-      "value": "[if(not(empty(parameters('nonproductionSubscriptionId'))), reference(subscriptionResourceId(variables('nonproductionDeploymentSubscriptionId'), 'Microsoft.Resources/deployments', format('{0}-application-nonprod', variables('prefix'))), '2025-04-01').outputs.virtualNetworkId.value, '')]"
+      "value": "[if(not(empty(parameters('nonproductionSubscriptionId'))), reference('nonproduction').outputs.virtualNetworkId.value, '')]"
     },
     "complianceAssignmentIds": {
       "type": "array",
-      "value": "[reference(extensionResourceId(tenantResourceId('Microsoft.Management/managementGroups', variables('prefix')), 'Microsoft.Resources/deployments', format('{0}-governance', variables('prefix'))), '2025-04-01').outputs.complianceAssignmentIds.value]"
+      "value": "[reference('governance').outputs.complianceAssignmentIds.value]"
+    },
+    "securityGroupObjectIds": {
+      "type": "object",
+      "value": {
+        "platformAdmins": "[reference(format('securityGroups[{0}]', 0)).outputs.groupObjectId.value]",
+        "securityReaders": "[reference(format('securityGroups[{0}]', 1)).outputs.groupObjectId.value]",
+        "applicationProd": "[reference(format('securityGroups[{0}]', 2)).outputs.groupObjectId.value]",
+        "applicationNonprod": "[if(not(empty(parameters('nonproductionSubscriptionId'))), reference(format('securityGroups[{0}]', 3)).outputs.groupObjectId.value, '')]"
+      }
     },
     "scaffoldNotice": {
       "type": "string",
-      "value": "No paid runtime services, peering, egress, central logging, Entra configuration, or automatic policy remediation are provisioned. See docs/operations.md before deploying workloads."
+      "value": "Security groups and Azure RBAC are included. No paid runtime services, peering, egress, central logging, Conditional Access, PIM, or automatic policy remediation are provisioned. See docs/operations.md before deploying workloads."
     }
   }
 }

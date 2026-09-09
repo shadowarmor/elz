@@ -1,11 +1,11 @@
 # ELZ — Enterprise Landing Zone
 
-Deploy a tenant-wide Azure foundation from Bicep: management groups, platform and application landing zones, subscription placement, policy, and optional group-based RBAC. Designed for a **greenfield Entra tenant in Azure public cloud**, with **no standing-charge services deployed by default**.
+Deploy a tenant-wide Azure foundation from Bicep: management groups, platform and application landing zones, subscription placement, policy, Entra security groups, and group-based RBAC. Designed for a **greenfield Entra tenant in Azure public cloud**, with **no standing-charge services deployed by default**.
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2Fshadowarmor%2Felz%40721ae7559e1db301e528b71601ae3d5e9b111782%2Fazuredeploy.json)
 [![Validate landing zone](https://github.com/shadowarmor/elz/actions/workflows/validate.yml/badge.svg)](https://github.com/shadowarmor/elz/actions/workflows/validate.yml)
 
-**Before clicking:** [complete the one-time tenant bootstrap](docs/bootstrap.md). You need **two existing empty Azure subscriptions** in that tenant and permission to deploy at tenant scope `/`. Entra Global Administrator alone is insufficient. The template cannot create an Entra tenant, grant its own starting permissions, or obtain a billing agreement. Azure subscription creation depends on your billing offer and is outside this portable scaffold.
+**Before clicking:** [complete the one-time tenant bootstrap](docs/bootstrap.md). You need **two existing empty Azure subscriptions**, permission to deploy at tenant scope `/`, and **Entra group-write privileges** for the default security-group creation. Azure Owner alone cannot create directory groups; Entra Global Administrator alone cannot deploy tenant-level Azure resources. The template cannot create an Entra tenant, grant its own starting permissions, or obtain a billing agreement.
 
 ## Deploy from the portal
 
@@ -13,7 +13,7 @@ Deploy a tenant-wide Azure foundation from Bicep: management groups, platform an
 2. Click **Deploy to Azure** above. This opens a **tenant-scoped** custom deployment; the deployment metadata location and the resource `Location` parameter are separate choices.
 3. Enter an organization prefix, a platform subscription ID, a **different** application subscription ID, region, Owner, and CostCenter. Defaults create the compact layout below. Check the directory displayed by the portal before submitting.
 4. Optionally supply separate management, identity, security, and nonproduction subscription IDs. **Every explicit subscription ID must be unique.** Leave optional platform IDs blank to share the platform subscription.
-5. Keep the default nonoverlapping network ranges or provide private IPv4 networks of `/16` through `/24`. If setting Allowed Locations, include the resource Location. Enter optional Entra **group object IDs** for delegated access.
+5. Keep the default nonoverlapping network ranges or provide private IPv4 networks of `/16` through `/24`. If setting Allowed Locations, include the resource Location. Leave **Create Security Groups = true** and the existing-group fields blank to create the required groups. Optionally supply owner/member **object IDs** or existing security groups. [Group names and access](docs/security-groups.md).
 6. Select **Review + create**, inspect validation, then **Create**. After completion, use deployment outputs and the [verification guide](docs/operations.md) to check hierarchy, policies, networks, and access.
 
 One deployment orchestrates the platform and application scaffolds. All modules are embedded in the committed ARM JSON; Azure does not need Bicep, a private registry, GitHub credentials, or deployment scripts. The buttons download the public template through jsDelivr, pinned to verified template commit `721ae7559e1db301e528b71601ae3d5e9b111782`. This avoids the GitHub raw-content endpoint that returned HTTP 503 during portal downloads. [Updating the pinned templates](docs/operations.md#updating-and-redeploying).
@@ -45,13 +45,15 @@ flowchart TD
 | Applications | Production network and workload resource groups; isolated VNet and two subnets; optional nonproduction subscription with the same structure |
 | Compliance | Microsoft cloud security benchmark, CIS Azure Foundations v3.0.0, and NIS2 assignments inherited from the intermediate root |
 | Guardrails | Restrict classic resources; optional allowed resource regions; audit missing/empty RG ownership tags; restrict public IP resources in Corp |
-| Access | Optional Platform Contributor group; root Reader + Security Reader group; application team Contributor on workload RGs only |
+| Access | Creates Platform Contributor and root Reader + Security Reader groups, plus separate production/nonproduction application Contributor groups on workload RGs only |
 
 **Compact:** two subscriptions. The shared platform subscription sits under **Platform**; all four platform resource groups are in it. The application subscription sits under **Corp** or **Online**.
 
 **Separated:** supply management, identity, and security subscription IDs; the original platform subscription becomes **Connectivity**. Each platform subscription then sits under its corresponding child management group. An optional nonproduction subscription brings this layout to six subscriptions. Partial splits are supported; the shared subscription stays under Platform until all three optional platform services have dedicated subscriptions.
 
-The Sandbox, Decommissioned, and Local groups are governance placeholders. No subscription is moved into them automatically. Decommissioned placement does not delete or cancel anything. This is a custom scaffold aligned with the Azure landing zone hierarchy, not the complete Microsoft ALZ accelerator policy library.
+The Sandbox, Decommissioned, and Local management groups are governance placeholders. No subscription is moved into them automatically. Decommissioned placement does not delete or cancel anything. This is a custom scaffold aligned with the Azure landing zone hierarchy, not the complete Microsoft ALZ accelerator policy library.
+
+Security groups use names `sg-<prefix>-platform-admins`, `sg-<prefix>-security-readers`, `sg-<prefix>-application-prod-contributors`, and, when nonproduction is enabled, `sg-<prefix>-application-nonprod-contributors`. They are ordinary static security groups with no premium-license feature enabled. **No members are added unless explicitly supplied.** Members and owners are appended, preserving existing membership on redeployment. Existing groups supplied by ID are reused without changing their directory properties or membership.
 
 ## Policy and cost behavior
 
@@ -77,23 +79,25 @@ Copy-Item examples/compact.parameters.json examples/deployment.local.json
 az login --tenant '<tenant-guid>'
 python scripts/preflight.py --parameters examples/deployment.local.json --online --tenant-id '<tenant-guid>'
 ./scripts/deploy.ps1 -TenantId '<tenant-guid>' -ParametersFile examples/deployment.local.json -Mode Validate
-./scripts/deploy.ps1 -TenantId '<tenant-guid>' -ParametersFile examples/deployment.local.json -Mode WhatIf
+# Review the group owners/members and RBAC configuration before deployment.
+# Microsoft Graph resources are not supported by ARM what-if.
 ./scripts/deploy.ps1 -TenantId '<tenant-guid>' -ParametersFile examples/deployment.local.json -Mode Deploy
 ```
 
-`preflight.py --online` performs read-only checks for a fresh deployment. It rejects populated subscriptions; use normal offline preflight plus what-if for intentional redeployments. It does not replace ARM validation or prove effective authorization.
+`preflight.py --online` performs read-only checks for a fresh deployment. It rejects populated subscriptions; use normal offline preflight plus ARM validation and configuration review for intentional redeployments. It does not replace ARM validation or prove group-write authorization. Microsoft Graph what-if is unsupported; do not treat it as a preview of group or membership changes. If the portal reports Graph authentication/privilege errors, use the documented [Azure CLI/PowerShell deployment path](docs/security-groups.md#authentication-and-portal-behavior) with the same template and required directory permissions.
 
 `infra/main.bicep` is the tenant entry point; `infra/platform.bicep` and `infra/application.bicep` are reusable building blocks. The [separated example](examples/enterprise.parameters.json) covers dedicated platform subscriptions. The application module can also deploy into an already governed subscription:
 
 [![Deploy application landing zone](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2Fshadowarmor%2Felz%40721ae7559e1db301e528b71601ae3d5e9b111782%2Fapplication.azuredeploy.json)
 
-That second button creates application resource groups and networking at subscription scope. It does **not** create management groups, move the subscription, or establish platform governance; place the subscription under the intended ELZ group first. Review existing policies and nonoverlapping CIDRs before use.
+That second button creates application resource groups, networking, and the application contributor security group at subscription scope. It does **not** create management groups, move the subscription, or establish platform governance; place the subscription under the intended ELZ group first. Review existing policies and nonoverlapping CIDRs before use. Supply an existing application group ID to reuse one, or leave it blank to create the group.
 
 ## Documentation and validation
 
 - [Tenant bootstrap and permissions](docs/bootstrap.md)
+- [Security groups, owners, members, and RBAC](docs/security-groups.md)
 - [Policy catalog, enforcement, and compliance boundaries](docs/policy.md)
 - [Operations, verification, troubleshooting, and extensions](docs/operations.md)
 - [Architecture decisions and Microsoft Learn sources](docs/architecture.md)
 
-Both entry points compile with the pinned Bicep version. CI checks compiled JSON consistency, isolation and cost boundaries, dependency gates, policy settings, and valid/invalid parameter scenarios. **A live Azure tenant deployment has not been performed for this repository's initial release.** ARM validate, what-if, and a fresh-tenant acceptance deployment are still required to establish deployment readiness in your target tenant.
+Both entry points compile with Bicep 0.47.16 and the pinned Microsoft Graph v1.0 extension 1.0.0. CI checks compiled JSON consistency, isolation and cost boundaries, dependency gates, group defaults and membership preservation, RBAC wiring, policy settings, and valid/invalid parameter scenarios. **The agent has not performed a live Azure/Graph deployment.** Target-tenant ARM validation and acceptance testing are required; Graph resources are not supported by what-if.

@@ -7,6 +7,7 @@
     "location": { "value": "southafricanorth" },
     "platformSubscriptionId": { "value": "REPLACE-WITH-PLATFORM-SUBSCRIPTION-ID" },
     "applicationSubscriptionId": { "value": "REPLACE-WITH-APPLICATION-SUBSCRIPTION-ID" },
+    "createSecurityGroups": { "value": true },
     "owner": { "value": "platform-team" },
     "costCenter": { "value": "shared-services" }
   }

@@ -50,17 +50,22 @@ foreach ($subscriptionId in $subscriptionIds) {
 
 Confirm Microsoft.Authorization, Microsoft.Resources, and Microsoft.Management operations are available in the target environment. The read-only preflight checks subscription state, network registration, region names, selected group IDs, and enabled initiative availability. Provider registration can take several minutes. [Resource providers](https://learn.microsoft.com/azure/azure-resource-manager/management/resource-providers-and-types).
 
-## 4. Optional delegation
+## 4. Security groups and directory permissions
 
-Create security-enabled Entra groups through your normal identity process and supply their **object IDs**. ELZ accepts existing groups and only creates Azure RBAC assignments. Leave fields blank to skip delegation; it never grants access to an unspecified user.
+ELZ now creates the required security groups by default using the Microsoft Graph Bicep extension. Leave **Create Security Groups = true** and the existing-group fields blank. To reuse your organization's groups, supply their **object IDs**; the template will not modify those groups' membership or properties. With `createSecurityGroups=false`, blank fields skip those groups and their RBAC assignments.
+
+The deployment principal needs both the Azure permissions above and permission to create/update Entra security groups. For interactive deployment, use a work/school account with the required group-management privileges; **Groups Administrator** is the documented role when tenant settings restrict group creation. Microsoft Graph Bicep group upserts require delegated `Group.ReadWrite.All`; Azure CLI and Azure PowerShell are Microsoft's documented supported interactive clients. For app-only automation, grant the deployment service principal the documented `Group.ReadWrite.All` application permission with administrator consent, separately from Azure RBAC. ELZ does not grant itself Graph permissions. [Group deployment permissions](https://learn.microsoft.com/graph/templates/bicep/reference/groups?view=graph-bicep-1.0) · [Interactive and app-only permissions](https://learn.microsoft.com/graph/templates/bicep/concept-permissions-and-privileges).
+
+`securityGroupOwnerObjectIds` optionally supplies trusted user/service-principal owners. `securityGroupMembers` optionally supplies member arrays. Both default to empty: no person is automatically made a member, and an administrator is not automatically made an owner of a security group. A tenant group administrator can manage empty groups later. **The `owner` parameter used for resource tags is only a label, not a group owner or member.** [Configuration examples](security-groups.md).
 
 | Group | Assignment |
 | --- | --- |
 | Platform administrators | Contributor at the Platform management group, inherited by its subscriptions |
 | Security readers | Reader and Security Reader at the organization intermediate root |
-| Application team | Contributor at each application **workload** resource group; no control over network resource groups |
+| Production application contributors | Contributor at the production **workload** resource group; no control over network resource groups |
+| Nonproduction application contributors | Separate group, created only when nonproduction is enabled; Contributor at its **workload** resource group |
 
-Application teams will need narrowly scoped network permissions or a platform-managed deployment path to attach NICs, private endpoints, or services to subnets. No automatic Network Contributor assignment is made.
+Application teams will need narrowly scoped network permissions or a platform-managed deployment path to attach NICs, private endpoints, or services to subnets. No automatic Network Contributor assignment is made. The groups are ordinary security groups for Azure RBAC, not Entra directory-role-assignable groups; Conditional Access, PIM, dynamic membership, and Entra directory role assignments are not enabled.
 
 ## 5. Deploy, verify, then remove temporary bootstrap privileges
 

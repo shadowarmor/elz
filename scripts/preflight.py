@@ -14,7 +14,8 @@ SUBSCRIPTIONS = (
     'platformSubscriptionId', 'applicationSubscriptionId', 'managementSubscriptionId',
     'identitySubscriptionId', 'securitySubscriptionId', 'nonproductionSubscriptionId',
 )
-GROUPS = ('platformAdminsGroupObjectId', 'securityReadersGroupObjectId', 'applicationTeamGroupObjectId')
+GROUPS = ('platformAdminsGroupObjectId', 'securityReadersGroupObjectId', 'applicationTeamGroupObjectId', 'nonproductionApplicationTeamGroupObjectId')
+MEMBER_KEYS = ('platformAdmins', 'securityReaders', 'applicationProd', 'applicationNonprod')
 
 
 def parameters(path):
@@ -50,6 +51,18 @@ def validate(values):
     for key in GROUPS:
         if values.get(key) and not valid_guid(values[key]):
             errors.append(f'{key}: supply an Entra group OBJECT ID, not its display name or application ID.')
+    owners = values.get('securityGroupOwnerObjectIds', [])
+    if not isinstance(owners, list) or len(owners) > 100 or any(not valid_guid(x) for x in owners):
+        errors.append('securityGroupOwnerObjectIds: supply an array of at most 100 user/service-principal object GUIDs.')
+    members = values.get('securityGroupMembers', {})
+    if not isinstance(members, dict):
+        errors.append('securityGroupMembers: supply an object containing member arrays.')
+    else:
+        for key, ids in members.items():
+            if key not in MEMBER_KEYS:
+                errors.append(f'Unknown securityGroupMembers key: {key}')
+            if not isinstance(ids, list) or any(not valid_guid(x) for x in ids):
+                errors.append(f'securityGroupMembers.{key}: supply an array of directory object GUIDs, not ARM resource IDs.')
     if not re.fullmatch(r'[a-z][a-z0-9-]{1,11}', values.get('organizationPrefix', '')):
         errors.append('organizationPrefix: use 2-12 lowercase letters/digits/hyphens, starting with a letter.')
     if values.get('applicationArchetype') not in ('corp', 'online'):
@@ -59,7 +72,7 @@ def validate(values):
     for key in ('owner', 'costCenter', 'organizationName', 'location'):
         if not isinstance(values.get(key), str) or not values[key].strip():
             errors.append(f'{key}: must not be blank.')
-    for key in ('enableMicrosoftCloudSecurityBenchmark', 'enableCis', 'enableNis2'):
+    for key in ('enableMicrosoftCloudSecurityBenchmark', 'enableCis', 'enableNis2', 'createSecurityGroups'):
         if not isinstance(values.get(key), bool):
             errors.append(f'{key}: must be a boolean.')
     allowed = values.get('allowedLocations', [])
@@ -123,7 +136,19 @@ def online(values, tenant_id):
             raise ValueError(f'{key}: register Microsoft.Network before deployment (see docs/bootstrap.md).')
     for key in GROUPS:
         if values.get(key):
-            az('ad', 'group', 'show', '--group', values[key])
+            group = az('ad', 'group', 'show', '--group', values[key])
+            if not group.get('securityEnabled'):
+                raise ValueError(f'{key}: the supplied group is not security-enabled.')
+    if values['createSecurityGroups']:
+        # Read-only authentication check, not proof of group-write privileges.
+        az('rest', '--method', 'get', '--url', 'https://graph.microsoft.com/v1.0/groups?$top=1&$select=id')
+        for object_id in values['securityGroupOwnerObjectIds']:
+            directory_object = az('rest', '--method', 'get', '--url', f'https://graph.microsoft.com/v1.0/directoryObjects/{object_id}')
+            if directory_object.get('@odata.type') not in ('#microsoft.graph.user', '#microsoft.graph.servicePrincipal'):
+                raise ValueError('Group owners must be user or service-principal object IDs.')
+        member_ids = {object_id for ids in values['securityGroupMembers'].values() for object_id in ids}
+        for object_id in member_ids:
+            az('rest', '--method', 'get', '--url', f'https://graph.microsoft.com/v1.0/directoryObjects/{object_id}')
     catalog = json.loads((ROOT / 'infra/policy-catalog.json').read_text())
     enabled = {'mcsb': values['enableMicrosoftCloudSecurityBenchmark'], 'cis': values['enableCis'], 'nis2': values['enableNis2']}
     for initiative in catalog['initiatives']:
@@ -134,7 +159,7 @@ def online(values, tenant_id):
         required = [k for k, v in properties.get('parameters', {}).items() if 'defaultValue' not in v]
         if required:
             raise ValueError(f'{initiative["displayName"]} now requires parameters: {required}')
-    print('Azure read checks passed. This does not prove effective RBAC or complete ARM validation; run tenant validate/what-if.')
+    print('Azure/Graph read checks passed. They do not prove write privileges. Run tenant validate; Graph resources are not supported by what-if.')
 
 
 def main():
